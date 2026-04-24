@@ -23,7 +23,7 @@ umap-learn>=0.5.0
 
 # Uncertainty & calibration
 torchcp>=0.2.0
-uncertainty-toolbox>=0.2.0
+uncertainty-toolbox>=0.1
 
 # Utilities
 numpy>=1.24.0
