@@ -3,7 +3,7 @@ HPO module: Hyperparameter optimization for DML with Optuna + Syne Tune
 """
 
 import optuna
-from optuna import Trial, TrialState
+from optuna import Trial
 import torch
 import torch.nn as nn
 import torch.optim as optim
