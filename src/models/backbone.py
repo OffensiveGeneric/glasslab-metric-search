@@ -5,7 +5,7 @@ Model module: Backbones for contrastive learning (ResNet, ViT, CLIP, DINO)
 import torch
 import torch.nn as nn
 import timm
-from transformers import CLIPVisionModel, DinoVisionModel
+from transformers import CLIPVisionModel
 from typing import List, Dict
 
 
@@ -24,12 +24,9 @@ class Backbone(nn.Module):
             self.backbone = timm.create_model(
                 backbone_name, pretrained=pretrained, num_classes=0
             )
-            if hasattr(self.backbone, "fc"):
-                in_features = self.backbone.fc.in_features
-            elif hasattr(self.backbone, "classifier"):
-                in_features = self.backbone.classifier.in_features
-            else:
-                in_features = self.backbone.num_features
+            # When num_classes=0, timm replaces fc with Identity
+            # Get in_features from num_features attribute
+            in_features = self.backbone.num_features
                 
         elif "vit" in backbone_name.lower() or "clip" in backbone_name.lower():
             if "clip" in backbone_name.lower():
@@ -37,8 +34,10 @@ class Backbone(nn.Module):
                     "openai/clip-vit-base-patch32" if "base" in backbone_name else "openai/clip-vit-large-patch14"
                 )
             elif "dino" in backbone_name.lower():
-                self.backbone = DinoVisionModel.from_pretrained(
-                    "facebook/dino-vitb16" if "base" in backbone_name else "facebook/dino-vitl16"
+                # DINO is loaded via timm, not transformers
+                self.backbone = timm.create_model(
+                    "vit_base_patch16_224.dino" if "base" in backbone_name else "vit_large_patch16_224.dino",
+                    pretrained=True, num_classes=0
                 )
             else:
                 self.backbone = timm.create_model(
