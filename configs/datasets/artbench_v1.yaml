@@ -1,0 +1,7 @@
+dataset_id: artbench-v1
+description: Bounded art similarity benchmark with retrieval and forgery verification tasks.
+split_version: split-2026-04-a
+train_uri: s3://datasets/artbench/train.parquet
+val_uri: s3://datasets/artbench/val.parquet
+test_uri: s3://datasets/artbench/test.parquet
+

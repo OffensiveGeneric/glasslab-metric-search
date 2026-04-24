@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+runs/
+dist/
+build/
+*.egg-info/
+configs/search_spaces/*_check*.yaml

@@ -1,0 +1,45 @@
+workflow_family: metric-search
+search_space_id: art-metric-baseline-v1
+dataset:
+  dataset_id: artbench-v1
+  split_version: split-2026-04-a
+  train_uri: s3://datasets/artbench/train.parquet
+  val_uri: s3://datasets/artbench/val.parquet
+  test_uri: s3://datasets/artbench/test.parquet
+resources:
+  gpu_count: 1
+  cpu_count: 8
+  memory_gb: 32
+budget:
+  max_epochs: 25
+  max_wallclock_minutes: 180
+experiment:
+  backbone:
+    name: vit_base_patch16
+    freeze_backbone: true
+  loss:
+    name: proxy_anchor
+    margin: 0.1
+    temperature: 0.07
+  miner:
+    name: multi_similarity
+  regularizer:
+    name: language_alignment
+    weight: 0.05
+  evaluator:
+    name: art_retrieval_v1
+  trainer:
+    batch_size: 64
+    learning_rate: 0.0001
+search_space:
+  mutable_fields:
+    backbone.name: [vit_base_patch16, convnext_base, resnet50]
+    loss.name: [proxy_anchor, multi_similarity, proxy_gml]
+    loss.margin: [0.05, 0.1, 0.2]
+    loss.temperature: [0.05, 0.07, 0.1]
+    miner.name: [multi_similarity, distance_weighted, hard_negative]
+    regularizer.name: [none, embedding_norm, language_alignment, center_smoothing]
+    regularizer.weight: [0.0, 0.01, 0.05, 0.1]
+    backbone.freeze_backbone: [true, false]
+    trainer.batch_size: [32, 64, 96]
+    trainer.learning_rate: [0.00005, 0.0001, 0.0003]

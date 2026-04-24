@@ -1,0 +1,4 @@
+name: cosine
+warmup_epochs: 2
+min_lr: 1.0e-6
+
