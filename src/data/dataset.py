@@ -7,7 +7,7 @@ import numpy as np
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
 from typing import Tuple, List
-from config import Config
+from src.config import Config
 import random
 
 
