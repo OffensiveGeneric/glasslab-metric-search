@@ -120,8 +120,16 @@ class AdvancedMetrics:
         
         return opis
     
+    def _predict_clusters(self, embeddings: torch.Tensor, n_clusters: int) -> np.ndarray:
+        """Predict cluster assignments using k-means"""
+        embeddings_np = embeddings.cpu().numpy()
+        kmeans = faiss.Kmeans(d=embeddings_np.shape[1], k=n_clusters, gpu=False)
+        kmeans.train(embeddings_np.astype("float32"))
+        _, labels_pred = kmeans.index.search(embeddings_np.astype("float32"), 1)
+        return labels_pred.flatten()
+    
     def compute_all_metrics(self, embeddings: torch.Tensor,
-                           labels: torch.Tensor) -> Dict[str, float]:
+                            labels: torch.Tensor) -> Dict[str, float]:
         """Compute all metrics at once"""
         results = {}
         
@@ -129,9 +137,16 @@ class AdvancedMetrics:
         embeddings_np = embeddings.cpu().numpy()
         labels_np = labels.cpu().numpy()
         
-        results["nmi"] = normalized_mutual_info_score(labels_np, labels_np)
-        results["ami"] = adjusted_mutual_info_score(labels_np, labels_np)
-        results["ari"] = adjusted_rand_score(labels_np, labels_np)
+        # Get number of unique classes for clustering
+        n_clusters = len(np.unique(labels_np))
+        
+        # Predict clusters for clustering-based metrics
+        labels_pred = self._predict_clusters(embeddings, n_clusters)
+        
+        # Clustering metrics: compare predicted clusters to true labels
+        results["nmi"] = normalized_mutual_info_score(labels_np, labels_pred)
+        results["ami"] = adjusted_mutual_info_score(labels_np, labels_pred)
+        results["ari"] = adjusted_rand_score(labels_np, labels_pred)
         results["silhouette"] = silhouette_score(embeddings_np, labels_np)
         
         # Advanced metrics

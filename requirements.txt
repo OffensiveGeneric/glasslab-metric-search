@@ -9,11 +9,6 @@ pytorch-metric-learning>=2.4.0
 faiss-cpu>=1.7.0
 torchmetrics>=0.11.0
 
-# AutoML & HPO
-optuna>=3.0.0
-syne-tune>=0.10.0
-ray[tune]>=2.0.0
-
 # Evaluation & statistics
 scikit-learn>=1.2.0
 scipy>=1.10.0

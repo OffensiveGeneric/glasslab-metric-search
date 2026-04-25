@@ -122,7 +122,11 @@ class Config:
     def from_yaml(cls, path: str) -> "Config":
         with open(path, "r") as f:
             data = yaml.safe_load(f)
-        return cls(**data)
+        config = cls()
+        for key, value in data.items():
+            if hasattr(config, key):
+                setattr(config, key, value)
+        return config
     
     def to_dict(self) -> dict:
         return {

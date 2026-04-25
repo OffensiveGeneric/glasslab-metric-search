@@ -187,17 +187,59 @@ class DMLPipeline:
             if isinstance(loss_fn, SupervisedContrastiveLoss):
                 loss = loss_fn(embeddings, labels)
             elif isinstance(loss_fn, TripletLoss):
-                # Simple triplet sampling
+                # Label-valid triplet mining
                 batch_size = embeddings.shape[0]
                 anchor = embeddings
-                positive = torch.cat([embeddings[1:], embeddings[:1]])
-                negative = torch.cat([embeddings[-1:], embeddings[:-1]])
+                
+                # Same-class positives
+                positive = torch.zeros_like(embeddings)
+                for i in range(batch_size):
+                    same_class_indices = torch.where(labels == labels[i])[0]
+                    if len(same_class_indices) > 1:
+                        # Pick a different sample from same class
+                        same_class_indices = same_class_indices[same_class_indices != i]
+                        pos_idx = same_class_indices[0]
+                    else:
+                        pos_idx = i
+                    positive[i] = embeddings[pos_idx]
+                
+                # Different-class negatives
+                negative = torch.zeros_like(embeddings)
+                for i in range(batch_size):
+                    diff_class_indices = torch.where(labels != labels[i])[0]
+                    if len(diff_class_indices) > 0:
+                        neg_idx = diff_class_indices[0]
+                    else:
+                        neg_idx = (i + 1) % batch_size
+                    negative[i] = embeddings[neg_idx]
+                
                 loss = loss_fn(anchor, positive, negative)
             elif isinstance(loss_fn, ShadowLoss):
+                # Label-valid triplet mining for Shadow Loss
                 batch_size = embeddings.shape[0]
                 anchor = embeddings
-                positive = torch.cat([embeddings[1:], embeddings[:1]])
-                negative = torch.cat([embeddings[-1:], embeddings[:-1]])
+                
+                # Same-class positives
+                positive = torch.zeros_like(embeddings)
+                for i in range(batch_size):
+                    same_class_indices = torch.where(labels == labels[i])[0]
+                    if len(same_class_indices) > 1:
+                        same_class_indices = same_class_indices[same_class_indices != i]
+                        pos_idx = same_class_indices[0]
+                    else:
+                        pos_idx = i
+                    positive[i] = embeddings[pos_idx]
+                
+                # Different-class negatives
+                negative = torch.zeros_like(embeddings)
+                for i in range(batch_size):
+                    diff_class_indices = torch.where(labels != labels[i])[0]
+                    if len(diff_class_indices) > 0:
+                        neg_idx = diff_class_indices[0]
+                    else:
+                        neg_idx = (i + 1) % batch_size
+                    negative[i] = embeddings[neg_idx]
+                
                 loss = loss_fn(anchor, positive, negative)
             else:
                 loss = torch.tensor(0.0).to(self.device)

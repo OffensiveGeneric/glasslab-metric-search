@@ -6,6 +6,7 @@ import optuna
 from optuna import Trial
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from typing import Dict, Any, List
@@ -35,9 +36,16 @@ class DMLHPO:
         margin = trial.suggest_float("margin", 0.1, 1.0)
         temperature = trial.suggest_float("temperature", 0.01, 0.2)
         
-        # Create dataloader with sampled batch size
-        train_loader = self.dataloaders["train_seen_0"]
-        train_loader.batch_size = batch_size
+        # Create dataloader with sampled batch size (avoid mutating shared loader)
+        from torch.utils.data import DataLoader
+        original_loader = self.dataloaders["train_seen_0"]
+        train_loader = DataLoader(
+            original_loader.dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=original_loader.num_workers,
+            pin_memory=original_loader.pin_memory,
+        )
         
         # Create model
         model = ModelFactory.create_backbone(self.config, "resnet18")
@@ -67,8 +75,11 @@ class DMLHPO:
             embeddings = model(images)
             
             # Compute loss
-            if loss_choice in ["contrastive", "shadow"]:
+            if loss_choice == "contrastive":
                 loss = loss_fn(embeddings, labels)
+            elif loss_choice == "shadow":
+                # ShadowLoss needs triplet mining
+                loss = self._compute_shadow_loss(embeddings, labels, ShadowLoss(embedding_dim=self.config.model.embedding_dim))
             else:
                 # Triplet loss needs anchor, positive, negative
                 # Simple implementation: use random triplets
@@ -117,6 +128,35 @@ class DMLHPO:
         loss = F.relu(pos_dist - neg_dist + margin)
         
         return loss.mean()
+    
+    def _compute_shadow_loss(self, embeddings: torch.Tensor,
+                             labels: torch.Tensor,
+                             loss_fn: ShadowLoss) -> torch.Tensor:
+        """Compute ShadowLoss with label-based triplet mining"""
+        batch_size = embeddings.shape[0]
+        
+        anchor = embeddings
+        
+        positive = torch.zeros_like(embeddings)
+        for i in range(batch_size):
+            same_class_indices = torch.where(labels == labels[i])[0]
+            if len(same_class_indices) > 1:
+                same_class_indices = same_class_indices[same_class_indices != i]
+                pos_idx = same_class_indices[0]
+            else:
+                pos_idx = i
+            positive[i] = embeddings[pos_idx]
+        
+        negative = torch.zeros_like(embeddings)
+        for i in range(batch_size):
+            diff_class_indices = torch.where(labels != labels[i])[0]
+            if len(diff_class_indices) > 0:
+                neg_idx = diff_class_indices[0]
+            else:
+                neg_idx = (i + 1) % batch_size
+            negative[i] = embeddings[neg_idx]
+        
+        return loss_fn(anchor, positive, negative)
     
     def run_optimization(self) -> optuna.Study:
         """Run the hyperparameter optimization"""

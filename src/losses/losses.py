@@ -5,7 +5,6 @@ Losses module: Contrastive Loss, Triplet Loss, Shadow Loss, and mining strategie
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchmetrics import RetrievalMAP, RetrievalHitRate
 from typing import Tuple, List, Optional
 import numpy as np
 

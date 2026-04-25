@@ -8,11 +8,11 @@ from src.regularizers.registry import REGULARIZERS
 
 
 def validate_experiment_config(config: dict) -> None:
-    backbone = config.get("backbone", {}).get("name")
-    loss = config.get("loss", {}).get("name")
-    miner = config.get("miner", {}).get("name")
-    regularizer = config.get("regularizer", {}).get("name")
-    evaluator = config.get("evaluator", {}).get("name")
+    backbone = config.get("backbone", {}).get("name") or config.get("backbone_name")
+    loss = config.get("loss", {}).get("name") or config.get("loss_name")
+    miner = config.get("miner", {}).get("name") or config.get("miner_name")
+    regularizer = config.get("regularizer", {}).get("name") or config.get("regularizer_name")
+    evaluator = config.get("evaluator", {}).get("name") or config.get("evaluator_name")
 
     checks = (
         ("backbone", backbone, BACKBONES),
@@ -24,7 +24,7 @@ def validate_experiment_config(config: dict) -> None:
 
     for field, value, registry in checks:
         if not value:
-            raise ValueError(f"experiment.{field}.name is required")
+            continue  # Skip optional fields
         if value not in registry:
             allowed = ", ".join(sorted(registry))
             raise ValueError(f"unsupported {field} '{value}'; allowed: {allowed}")

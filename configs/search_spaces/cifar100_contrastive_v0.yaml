@@ -3,10 +3,9 @@ search_space_id: cifar100-contrastive-v0
 dataset:
   dataset_id: cifar100-unseen-classes
   split_version: split-2026-04-a
-  train_seen_uri: s3://datasets/cifar100/train_seen.parquet
-  val_seen_uri: s3://datasets/cifar100/val_seen.parquet
-  test_seen_uri: s3://datasets/cifar100/test_seen.parquet
-  test_unseen_uri: s3://datasets/cifar100/test_unseen.parquet
+  train_uri: s3://datasets/cifar100/train_seen.parquet
+  val_uri: s3://datasets/cifar100/val_seen.parquet
+  test_uri: s3://datasets/cifar100/test_seen.parquet
 resources:
   gpu_count: 1
   cpu_count: 8

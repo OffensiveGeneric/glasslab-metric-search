@@ -139,11 +139,8 @@ def main() -> None:
     if "cifar100" in dataset_id.lower():
         dataset_type = "contrastive"
     
-    dataset_type = args.dataset_type
-    if "cifar100" in dataset_id.lower():
-        dataset_type = "contrastive"
-    
     if dataset_type == "contrastive":
+        metrics = simulate_contrastive_experiment(run_spec, run_dir)
         write_text(
             run_dir / "report.md",
             (
@@ -161,6 +158,7 @@ def main() -> None:
             ),
         )
     else:
+        metrics = simulate_experiment(run_spec)
         write_text(
             run_dir / "report.md",
             (
