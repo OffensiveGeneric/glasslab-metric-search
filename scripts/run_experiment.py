@@ -158,7 +158,7 @@ def main() -> None:
             ),
         )
     else:
-        metrics = simulate_experiment(run_spec)
+        metrics = simulate_experiment(run_spec, run_dir)
         write_text(
             run_dir / "report.md",
             (
