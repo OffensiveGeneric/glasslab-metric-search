@@ -22,8 +22,8 @@ class AdvancedMetrics:
         self.num_groups = config.evaluation.num_groups
         
     def grouped_recall_at_k(self, embeddings: torch.Tensor, 
-                           labels: torch.Tensor,
-                           k: int = 5) -> float:
+                            labels: torch.Tensor,
+                            k: int = 5) -> float:
         """
         Grouped Recall@K: Partition test set into non-overlapping groups
         to make metric invariant to dataset size
@@ -35,9 +35,12 @@ class AdvancedMetrics:
         embeddings_np = embeddings.cpu().numpy()
         labels_np = labels.cpu().numpy()
         
+        # Use deterministic random generator
+        rng = np.random.default_rng(self.config.data.seed)
+        
         # Partition into groups
         unique_labels = np.unique(labels_np)
-        np.random.shuffle(unique_labels)
+        rng.shuffle(unique_labels)
         
         group_size = max(1, len(unique_labels) // self.num_groups)
         groups = [unique_labels[i:i+group_size] for i in range(0, len(unique_labels), group_size)]

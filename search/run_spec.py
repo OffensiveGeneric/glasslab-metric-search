@@ -16,6 +16,8 @@ def utc_now_iso() -> str:
 class Budget:
     max_epochs: int
     max_wallclock_minutes: int
+    max_train_batches: int | None = None
+    max_eval_batches: int | None = None
 
 
 @dataclass
@@ -96,6 +98,9 @@ class RunSpec:
 
 def load_run_spec(path: Path) -> RunSpec:
     payload = json.loads(path.read_text(encoding="utf-8"))
+    budget_data = payload["budget"].copy()
+    budget_data.setdefault("max_train_batches", None)
+    budget_data.setdefault("max_eval_batches", None)
     return RunSpec(
         run_id=payload["run_id"],
         parent_run_id=payload.get("parent_run_id"),
@@ -106,7 +111,7 @@ def load_run_spec(path: Path) -> RunSpec:
         search_space_id=payload["search_space_id"],
         dataset=DatasetBinding(**payload["dataset"]),
         resources=Resources(**payload["resources"]),
-        budget=Budget(**payload["budget"]),
+        budget=Budget(**budget_data),
         config=payload["config"],
         artifact_refs=ArtifactRefs(**payload.get("artifact_refs", {})),
     )

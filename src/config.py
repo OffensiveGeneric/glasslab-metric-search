@@ -1,9 +1,6 @@
-"""
-DML Project: Structural Robustness & Generalization
-Main configuration file
-"""
+from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import List, Optional
 import yaml
 import os
@@ -122,25 +119,34 @@ class Config:
     def from_yaml(cls, path: str) -> "Config":
         with open(path, "r") as f:
             data = yaml.safe_load(f)
-        config = cls()
-        for key, value in data.items():
-            if hasattr(config, key):
-                setattr(config, key, value)
-        return config
+        
+        def build_dataclass(obj_class: type, data_dict: dict) -> any:
+            if not hasattr(obj_class, "__dataclass_fields__"):
+                return data_dict
+            dataclass_fields = obj_class.__dataclass_fields__
+            kwargs = {}
+            for field_name, field_info in dataclass_fields.items():
+                if field_name not in data_dict:
+                    continue
+                field_value = data_dict[field_name]
+                field_type = field_info.type
+                
+                if isinstance(field_value, dict):
+                    if hasattr(field_type, "__origin__") and field_type.__origin__ is list:
+                        item_type = field_type.__args__[0]
+                        kwargs[field_name] = [build_dataclass(item_type, item) for item in field_value]
+                    elif hasattr(field_type, "__dataclass_fields__"):
+                        kwargs[field_name] = build_dataclass(field_type, field_value)
+                    else:
+                        kwargs[field_name] = field_value
+                else:
+                    kwargs[field_name] = field_value
+            return obj_class(**kwargs)
+        
+        return build_dataclass(cls, data)
     
     def to_dict(self) -> dict:
-        return {
-            "data": vars(self.data),
-            "augmentation": vars(self.augmentation),
-            "loss": vars(self.loss),
-            "model": vars(self.model),
-            "training": vars(self.training),
-            "hpo": vars(self.hpo),
-            "evaluation": vars(self.evaluation),
-            "l2anc": vars(self.l2anc),
-            "project_dir": self.project_dir,
-            "wandb_enabled": self.wandb_enabled
-        }
+        return asdict(self)
 
 
 def get_config(path: Optional[str] = None) -> Config:

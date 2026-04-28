@@ -24,7 +24,7 @@ def validate_experiment_config(config: dict) -> None:
 
     for field, value, registry in checks:
         if not value:
-            continue  # Skip optional fields
+            continue
         if value not in registry:
             allowed = ", ".join(sorted(registry))
             raise ValueError(f"unsupported {field} '{value}'; allowed: {allowed}")
@@ -35,11 +35,9 @@ def validate_cifar100_config(config: dict) -> None:
     
     dataset_id = config.get("dataset", {}).get("dataset_id", "")
     if "cifar100" in dataset_id.lower():
-        # For contrastive learning pipeline
         pipeline = config.get("pipeline", "contrastive")
         
         if pipeline == "contrastive_learning":
-            # Validate contrastive learning specific fields
             model_family = config.get("model_family", "")
             if not model_family:
                 raise ValueError("contrastive learning requires model_family")
@@ -54,7 +52,6 @@ def validate_cifar100_config(config: dict) -> None:
                 allowed = ", ".join(["resnet50", "vit_base_patch16", "convnext_base"])
                 raise ValueError(f"CIFAR-100 contrastive learning requires backbone_name from: {allowed}")
         else:
-            # Legacy validation
             backbone = config.get("backbone", {}).get("name", "")
             if backbone not in ["resnet50", "vit_base_patch16", "convnext_base"]:
                 allowed = ", ".join(["resnet50", "vit_base_patch16", "convnext_base"])

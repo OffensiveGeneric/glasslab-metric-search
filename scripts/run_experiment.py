@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from search.run_spec import Budget, DatasetBinding, Resources, RunSpec, utc_now_iso
 from search.validation import validate_experiment_config, validate_cifar100_config
-from src.runners.experiment import simulate_experiment, simulate_contrastive_experiment
+from src.runners.experiment import run_contrastive_experiment
 
 
 def write_text(path: Path, content: str) -> None:
@@ -95,7 +95,11 @@ def main() -> None:
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--submitted-by", default="local-cli")
-    parser.add_argument("--dataset-type", default="standard", choices=["standard", "contrastive"])
+    parser.add_argument("--epochs", type=int, default=None, help="Override epochs")
+    parser.add_argument("--max-train-batches", type=int, default=None, help="Override max train batches")
+    parser.add_argument("--max-eval-batches", type=int, default=None, help="Override max eval batches")
+    parser.add_argument("--backbone", default=None, help="Override backbone name")
+    parser.add_argument("--loss", default=None, help="Override loss name")
     args = parser.parse_args()
 
     config = load_yaml(args.config)
@@ -110,7 +114,23 @@ def main() -> None:
     
     dataset = DatasetBinding(**config["dataset"])
     resources = Resources(**config["resources"])
-    budget = Budget(**config["budget"])
+    
+    budget_config = config["budget"].copy()
+    if args.epochs is not None:
+        budget_config["max_epochs"] = args.epochs
+    
+    budget = Budget(**budget_config)
+    if args.max_train_batches is not None:
+        budget.max_train_batches = args.max_train_batches
+    if args.max_eval_batches is not None:
+        budget.max_eval_batches = args.max_eval_batches
+    
+    experiment_config = config["experiment"].copy()
+    if args.backbone is not None:
+        experiment_config["backbone_name"] = args.backbone
+    if args.loss is not None:
+        experiment_config["loss_name"] = args.loss
+    
     run_spec = RunSpec.new(
         base_commit=current_commit(),
         submitted_by=args.submitted_by,
@@ -119,7 +139,7 @@ def main() -> None:
         dataset=dataset,
         resources=resources,
         budget=budget,
-        config=config["experiment"],
+        config=experiment_config,
         parent_run_id=config.get("parent_run_id"),
     )
     glasslab_run_id = os.environ.get("GLASSLAB_RUNNER_EXPERIMENT_ID", "").strip()
@@ -130,44 +150,24 @@ def main() -> None:
     write_text(run_dir / "run_manifest.json", json.dumps(run_spec.to_dict(), indent=2, sort_keys=True) + "\n")
     write_text(run_dir / "logs" / "runner.log", "INFO metric-search run started\n")
     
-    dataset_type = args.dataset_type
-    if "cifar100" in dataset_id.lower():
-        dataset_type = "contrastive"
-    
-    # For CIFAR-100, use contrastive simulation
-    dataset_type = args.dataset_type
-    if "cifar100" in dataset_id.lower():
-        dataset_type = "contrastive"
-    
-    if dataset_type == "contrastive":
-        metrics = simulate_contrastive_experiment(run_spec, run_dir)
-        write_text(
-            run_dir / "report.md",
-            (
-                f"# Contrastive Learning Report\n\n"
-                f"- run_id: `{run_spec.run_id}`\n"
-                f"- search_space_id: `{run_spec.search_space_id}`\n"
-                f"- dataset_id: `{dataset_id}`\n"
-                f"- grouped_recall_at_k: `{metrics['grouped_recall_at_k']}`\n"
-                f"- opis: `{metrics['opis']}`\n"
-                f"- ami: `{metrics['adjusted_mutual_info']}`\n"
-                f"- ari: `{metrics['adjusted_rand_index']}`\n"
-                f"- nmi: `{metrics['normalized_mutual_info']}`\n"
-                f"- silhouette: `{metrics['silhouette_score']}`\n"
-                f"- composite_score: `{metrics['composite_score']}`\n"
-            ),
-        )
-    else:
-        metrics = simulate_experiment(run_spec, run_dir)
-        write_text(
-            run_dir / "report.md",
-            (
-                f"# Metric Search Report\n\n"
-                f"- run_id: `{run_spec.run_id}`\n"
-                f"- search_space_id: `{run_spec.search_space_id}`\n"
-                f"- composite_score: `{metrics['composite_score']}`\n"
-            ),
-        )
+    metrics = run_contrastive_experiment(run_spec, run_dir)
+    write_text(
+        run_dir / "report.md",
+        (
+            f"# Contrastive Learning Report\n\n"
+            f"- run_id: `{run_spec.run_id}`\n"
+            f"- search_space_id: `{run_spec.search_space_id}`\n"
+            f"- dataset_id: `{dataset_id}`\n"
+            f"- grouped_recall_at_k: `{metrics['grouped_recall_at_k']}`\n"
+            f"- opis: `{metrics['opis']}`\n"
+            f"- ami: `{metrics['adjusted_mutual_info']}`\n"
+            f"- ari: `{metrics['adjusted_rand_index']}`\n"
+            f"- nmi: `{metrics['normalized_mutual_info']}`\n"
+            f"- silhouette: `{metrics['silhouette_score']}`\n"
+            f"- composite_score: `{metrics['composite_score']}`\n"
+            f"- mode: real\n"
+        ),
+    )
     write_text(
         run_dir / "status.json",
         json.dumps(
