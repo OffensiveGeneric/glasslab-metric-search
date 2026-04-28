@@ -107,8 +107,11 @@ def evaluate_metrics(
 
 def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
     """Run a real training experiment on CIFAR-100."""
+    import time as t
     print(f"Starting run_real_experiment", file=sys.stderr)
+    print(f"Time {t.time()}: Starting", file=sys.stderr)
     output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Time {t.time()}: Output dir created", file=sys.stderr)
 
     config_path = output_dir / "config.yaml"
     if config_path.exists():
@@ -131,10 +134,13 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
                 else:
                     config.augmentation = AugmentationConfig(**value)
             elif key == "loss":
-                if isinstance(config.loss, LossConfig):
-                    config.loss = LossConfig(**value)
+                loss_name = run_spec.config.get("loss_name", value.get("name", "contrastive"))
+                if loss_name == "contrastive":
+                    config.loss = LossConfig(contrastive=value)
+                elif loss_name == "triplet":
+                    config.loss = LossConfig(triplet=value)
                 else:
-                    config.loss = LossConfig(**value)
+                    config.loss = LossConfig(**{loss_name: value})
             elif key == "model":
                 if isinstance(config.model, ModelConfig):
                     config.model = ModelConfig(**value)
@@ -247,17 +253,23 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
         
         return embeddings, labels
     
+    print(f"Time {t.time()}: Collecting embeddings", file=sys.stderr)
     val_seen_embeddings, val_seen_labels = collect_embeddings_for_loader(dataloaders.get("val_seen_0"), "val_seen")
+    print(f"Time {t.time()}: val_seen embeddings done", file=sys.stderr)
     test_seen_embeddings, test_seen_labels = collect_embeddings_for_loader(dataloaders.get("test_seen_0"), "test_seen")
+    print(f"Time {t.time()}: test_seen embeddings done", file=sys.stderr)
     test_unseen_embeddings, test_unseen_labels = collect_embeddings_for_loader(dataloaders.get("test_unseen_0"), "test_unseen")
+    print(f"Time {t.time()}: test_unseen embeddings done", file=sys.stderr)
     
     # Compute metrics from collected embeddings
     def compute_split_metrics_from_embeddings(embeddings, labels, split_name, config):
         if embeddings is None or labels is None:
             return {}
         
+        print(f"Time {t.time()}: Computing metrics for {split_name}", file=sys.stderr)
         metrics_fn = AdvancedMetrics(config)
         split_metrics = metrics_fn.compute_all_metrics(embeddings, labels)
+        print(f"Time {t.time()}: Metrics computed for {split_name}: {list(split_metrics.keys())}", file=sys.stderr)
         
         prefixed_metrics = {}
         for key, value in split_metrics.items():
@@ -277,6 +289,21 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
     if test_seen_metrics and test_unseen_metrics:
         generalization_gap_grouped_recall_at_k = test_seen_metrics.get("test_seen_grouped_recall_at_k", 0) - test_unseen_metrics.get("test_unseen_grouped_recall_at_k", 0)
         all_metrics["generalization_gap_grouped_recall_at_k"] = generalization_gap_grouped_recall_at_k
+    
+    # Add top-level summary aliases for backward compatibility
+    alias_map = {
+        "grouped_recall_at_k": "test_unseen_grouped_recall_at_k",
+        "opis": "test_unseen_opis",
+        "adjusted_mutual_info": "test_unseen_adjusted_mutual_info",
+        "adjusted_rand_index": "test_unseen_adjusted_rand_index",
+        "normalized_mutual_info": "test_unseen_normalized_mutual_info",
+        "silhouette_score": "test_unseen_silhouette_score",
+        "composite_score": "test_unseen_composite_score",
+    }
+    
+    for alias, source_key in alias_map.items():
+        if source_key in all_metrics:
+            all_metrics[alias] = all_metrics[source_key]
 
     metrics = all_metrics
 

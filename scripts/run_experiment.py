@@ -8,6 +8,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Fix FAISS OpenMP deadlock on macOS - MUST be before any other imports
+if os.uname().sysname == "Darwin":
+    os.environ.setdefault("MKL_DEBUG_CPU_TYPE", "5")
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -234,7 +239,6 @@ def main() -> None:
     budget_config = config["budget"].copy()
     if args.epochs is not None:
         budget_config["max_epochs"] = args.epochs
-        experiment_config["max_epochs"] = args.epochs
     
     budget = Budget(**budget_config)
     if args.max_train_batches is not None:
@@ -243,10 +247,13 @@ def main() -> None:
         budget.max_eval_batches = args.max_eval_batches
     
     experiment_config = config["experiment"].copy()
+    if args.epochs is not None:
+        experiment_config["max_epochs"] = args.epochs
     if args.backbone is not None:
         experiment_config["backbone_name"] = args.backbone
     if args.loss is not None:
         experiment_config["loss_name"] = args.loss
+        experiment_config.pop("loss", None)
     
     run_spec = RunSpec.new(
         base_commit=current_commit(),
@@ -267,11 +274,11 @@ def main() -> None:
     write_text(run_dir / "run_manifest.json", json.dumps(run_spec.to_dict(), indent=2, sort_keys=True) + "\n")
     append_log(run_dir, "INFO metric-search run started")
     
-    force_failure = os.environ.get("GLASSLAB_FORCE_TRAINER_FAILURE", "").strip()
-    if force_failure:
-        raise RuntimeError(f"GLASSLAB_FORCE_TRAINER_FAILURE is set: {force_failure}")
-
     try:
+        force_failure = os.environ.get("GLASSLAB_FORCE_TRAINER_FAILURE", "").strip()
+        if force_failure:
+            raise RuntimeError(f"GLASSLAB_FORCE_TRAINER_FAILURE is set: {force_failure}")
+        
         metrics = run_contrastive_experiment(run_spec, run_dir)
     except Exception as e:
         print(f"Error running experiment: {e}", file=sys.stderr)

@@ -156,16 +156,16 @@ class Cifar100Splitter:
             batch_size = self.config.training.batch_size
             
             dataloaders[f"train_seen_{i}"] = DataLoader(
-                train_seen, batch_size=batch_size, shuffle=True, num_workers=4
+                train_seen, batch_size=batch_size, shuffle=True, num_workers=0
             )
             dataloaders[f"val_seen_{i}"] = DataLoader(
-                val_seen, batch_size=batch_size, shuffle=False, num_workers=4
+                val_seen, batch_size=batch_size, shuffle=False, num_workers=0
             )
             dataloaders[f"test_seen_{i}"] = DataLoader(
-                test_seen, batch_size=batch_size, shuffle=False, num_workers=4
+                test_seen, batch_size=batch_size, shuffle=False, num_workers=0
             )
             dataloaders[f"test_unseen_{i}"] = DataLoader(
-                test_unseen, batch_size=batch_size, shuffle=False, num_workers=4
+                test_unseen, batch_size=batch_size, shuffle=False, num_workers=0
             )
             
             # Store class indices for reference

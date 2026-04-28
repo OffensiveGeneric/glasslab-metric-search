@@ -2,15 +2,23 @@
 Metrics module: Advanced evaluation metrics for DML
 """
 
+import os
+import sys
+import time
 import torch
 import numpy as np
-import sys
 from sklearn.metrics import (
     normalized_mutual_info_score, adjusted_mutual_info_score,
     adjusted_rand_score, silhouette_score
 )
 from typing import List, Tuple, Dict
-import faiss
+
+# Only import FAISS on non-macOS platforms (FAISS has OpenMP deadlock on macOS)
+# Kubernetes cluster runs on Linux where FAISS works fine
+import_platform_faiss = None
+if os.uname().sysname != "Darwin":
+    import faiss
+    import_platform_faiss = faiss
 
 
 class AdvancedMetrics:
@@ -29,43 +37,64 @@ class AdvancedMetrics:
         Grouped Recall@K: Partition test set into non-overlapping groups
         to make metric invariant to dataset size
         """
+        import time
+        print(f"Time {time.time()}: grouped_recall_at_k starting", file=sys.stderr, flush=True)
         if len(embeddings) == 0:
             return 0.0
-            
+        
+        print(f"Time {time.time()}: Converting to numpy", file=sys.stderr, flush=True)
         # Convert to numpy for FAISS
         embeddings_np = embeddings.cpu().detach().numpy()
+        print(f"Time {time.time()}: embeddings converted", file=sys.stderr, flush=True)
         labels_np = labels.cpu().detach().numpy()
+        print(f"Time {time.time()}: labels converted", file=sys.stderr, flush=True)
         
         # Use deterministic random generator
         rng = np.random.default_rng(self.config.data.seed)
+        print(f"Time {time.time()}: rng created", file=sys.stderr, flush=True)
         
         # Partition into groups
         unique_labels = np.unique(labels_np)
+        print(f"Time {time.time()}: unique_labels, shape {unique_labels.shape}", file=sys.stderr, flush=True)
         rng.shuffle(unique_labels)
+        print(f"Time {time.time()}: shuffle done", file=sys.stderr, flush=True)
         
         group_size = max(1, len(unique_labels) // self.num_groups)
+        print(f"Time {time.time()}: group_size = {group_size}", file=sys.stderr, flush=True)
         groups = [unique_labels[i:i+group_size] for i in range(0, len(unique_labels), group_size)]
+        print(f"Time {time.time()}: groups created, {len(groups)} groups", file=sys.stderr, flush=True)
         
         recalls = []
+        print(f"Time {time.time()}: Starting loop over {len(groups)} groups", file=sys.stderr, flush=True)
         
-        for group in groups:
+        for group_idx, group in enumerate(groups):
+            print(f"Time {time.time()}: Processing group {group_idx}, size {len(group)}", file=sys.stderr, flush=True)
             # Filter embeddings and labels for this group
             mask = np.isin(labels_np, group)
+            print(f"Time {time.time()}: mask computed", file=sys.stderr, flush=True)
             group_embeddings = embeddings_np[mask]
             group_labels = labels_np[mask]
+            print(f"Time {time.time()}: group embeddings shape {group_embeddings.shape}", file=sys.stderr, flush=True)
             
             if len(group_embeddings) == 0:
                 continue
-                
+            
+            print(f"Time {time.time()}: Building FAISS index", file=sys.stderr, flush=True)
             # Build FAISS index
             dimension = group_embeddings.shape[1]
+            print(f"Time {time.time()}: Creating FAISS index with dimension {dimension}", file=sys.stderr, flush=True)
             index = faiss.IndexFlatL2(dimension)
+            print(f"Time {time.time()}: Index created", file=sys.stderr, flush=True)
+            print(f"Time {time.time()}: Adding embeddings (shape {group_embeddings.shape}) to index", file=sys.stderr, flush=True)
             index.add(group_embeddings.astype("float32"))
+            print(f"Time {time.time()}: Added to index", file=sys.stderr, flush=True)
             
             # Query for each sample
+            print(f"Time {time.time()}: Searching with k={k+1}...", file=sys.stderr, flush=True)
             distances, indices = index.search(
                 group_embeddings.astype("float32"), k + 1
             )
+            print(f"Time {time.time()}: Search done", file=sys.stderr, flush=True)
             
             # Calculate recall@k
             recall_count = 0
@@ -76,7 +105,9 @@ class AdvancedMetrics:
                     
             recalls.append(recall_count / len(group_embeddings))
             
-        return np.mean(recalls) if recalls else 0.0
+        result = np.mean(recalls) if recalls else 0.0
+        print(f"Time {time.time()}: grouped_recall_at_k done: {result}", file=sys.stderr, flush=True)
+        return result
     
     def opis(self, embeddings: torch.Tensor,
              labels: torch.Tensor) -> float:
@@ -125,6 +156,7 @@ class AdvancedMetrics:
             mean_f1 = np.mean(f1_scores)
             opis = np.mean(np.abs(np.array(f1_scores) - mean_f1))
         
+        print(f"Time {time.time()}: opis done: {opis}", file=sys.stderr)
         return opis
     
     def _predict_clusters(self, embeddings: torch.Tensor, n_clusters: int) -> np.ndarray:

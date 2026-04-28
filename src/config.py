@@ -46,6 +46,21 @@ class LossConfig:
         "projection_dim": 1,
         "learnable_projection": True
     })
+    multi_similarity: dict = field(default_factory=lambda: {
+        "margin": 0.05,
+        "temperature": 0.05
+    })
+    proxy_anchor: dict = field(default_factory=lambda: {
+        "num_classes": 100,
+        "embedding_dim": 512,
+        "margin": 0.05,
+        "temperature": 0.05
+    })
+    proxy_gml: dict = field(default_factory=lambda: {
+        "num_classes": 100,
+        "embedding_dim": 512,
+        "margin": 0.05
+    })
 
 
 @dataclass
