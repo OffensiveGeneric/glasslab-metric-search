@@ -237,27 +237,6 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
 
     metrics = evaluate_metrics(model, dataloaders, device, config)
 
-    if "grouped_recall_at_k" not in metrics:
-        raise RuntimeError(
-            "grouped_recall_at_k metric is missing. "
-            "The evaluation pipeline did not produce expected metrics. "
-            "Please check the dataset and model configuration."
-        )
-    
-    metrics["composite_score"] = round(
-        (
-            metrics.get("grouped_recall_at_k", 0)
-            + (1.0 - metrics.get("opis", 0))
-            + metrics.get("adjusted_mutual_info", 0)
-            + metrics.get("adjusted_rand_index", 0)
-            + metrics.get("normalized_mutual_info", 0)
-            + metrics.get("silhouette_score", 0)
-        )
-        / 6.0,
-        4,
-    )
-
-    print(f"About to write metrics.json", file=sys.stderr)
     metrics["run_id"] = run_spec.run_id
     metrics["dataset_id"] = run_spec.dataset.dataset_id
     metrics["mode"] = "real"

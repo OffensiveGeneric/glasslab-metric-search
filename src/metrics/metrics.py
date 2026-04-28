@@ -158,16 +158,37 @@ class AdvancedMetrics:
         labels_pred = self._predict_clusters(embeddings, n_clusters)
         
         # Clustering metrics: compare predicted clusters to true labels
-        results["nmi"] = normalized_mutual_info_score(labels_np, labels_pred)
-        results["ami"] = adjusted_mutual_info_score(labels_np, labels_pred)
-        results["ari"] = adjusted_rand_score(labels_np, labels_pred)
-        results["silhouette"] = silhouette_score(embeddings_np, labels_np)
+        # Use long names as the canonical contract
+        results["normalized_mutual_info"] = normalized_mutual_info_score(labels_np, labels_pred)
+        results["adjusted_mutual_info"] = adjusted_mutual_info_score(labels_np, labels_pred)
+        results["adjusted_rand_index"] = adjusted_rand_score(labels_np, labels_pred)
+        results["silhouette_score"] = silhouette_score(embeddings_np, labels_np)
         
         # Advanced metrics
         results["grouped_recall_at_k"] = self.grouped_recall_at_k(
             embeddings, labels, k=self.k
         )
         results["opis"] = self.opis(embeddings, labels)
+        
+        # Optionally include short aliases for backward compatibility
+        results["nmi"] = results["normalized_mutual_info"]
+        results["ami"] = results["adjusted_mutual_info"]
+        results["ari"] = results["adjusted_rand_index"]
+        results["silhouette"] = results["silhouette_score"]
+        
+        # Compute composite_score only after required long names are present
+        results["composite_score"] = round(
+            (
+                results.get("grouped_recall_at_k", 0)
+                + (1.0 - results.get("opis", 0))
+                + results.get("adjusted_mutual_info", 0)
+                + results.get("adjusted_rand_index", 0)
+                + results.get("normalized_mutual_info", 0)
+                + results.get("silhouette_score", 0)
+            )
+            / 6.0,
+            4,
+        )
         
         return results
 

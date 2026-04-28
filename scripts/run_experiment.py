@@ -17,6 +17,100 @@ from search.validation import validate_experiment_config, validate_cifar100_conf
 from src.runners.experiment import run_contrastive_experiment
 
 
+def append_log(run_dir: Path, message: str) -> None:
+    log_path = run_dir / "logs" / "runner.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(message + "\n")
+
+
+def write_status(run_dir: Path, status: str, detail: str = "") -> None:
+    status_path = run_dir / "status.json"
+    status_data = {
+        "run_id": run_dir.name,
+        "status": status,
+        "updated_at": utc_now_iso(),
+        "detail": detail,
+    }
+    write_text(run_dir / "status.json", json.dumps(status_data, indent=2, sort_keys=True) + "\n")
+
+
+def write_error(run_dir: Path, exception: Exception, traceback_str: str) -> None:
+    error_path = run_dir / "error.json"
+    error_data = {
+        "run_id": run_dir.name,
+        "exception_type": type(exception).__name__,
+        "message": str(exception),
+        "traceback": traceback_str,
+        "timestamp": utc_now_iso(),
+    }
+    write_text(run_dir / "error.json", json.dumps(error_data, indent=2, sort_keys=True) + "\n")
+
+
+def write_metrics(run_dir: Path, metrics: dict) -> None:
+    write_text(run_dir / "metrics.json", json.dumps(metrics, indent=2, sort_keys=True) + "\n")
+
+
+def write_report(run_dir: Path, metrics: dict, run_spec: RunSpec, dataset_id: str) -> None:
+    report_path = run_dir / "report.md"
+    report_content = (
+        f"# Contrastive Learning Report\n\n"
+        f"- run_id: `{run_spec.run_id}`\n"
+        f"- search_space_id: `{run_spec.search_space_id}`\n"
+        f"- dataset_id: `{dataset_id}`\n"
+        f"- grouped_recall_at_k: `{metrics.get('grouped_recall_at_k')}`\n"
+        f"- opis: `{metrics.get('opis')}`\n"
+        f"- adjusted_mutual_info: `{metrics.get('adjusted_mutual_info')}`\n"
+        f"- adjusted_rand_index: `{metrics.get('adjusted_rand_index')}`\n"
+        f"- normalized_mutual_info: `{metrics.get('normalized_mutual_info')}`\n"
+        f"- silhouette_score: `{metrics.get('silhouette_score')}`\n"
+        f"- composite_score: `{metrics.get('composite_score')}`\n"
+        f"- mode: {metrics.get('mode', 'real')}\n"
+        f"- simulated: {metrics.get('simulated', False)}\n"
+    )
+    write_text(report_path, report_content)
+
+
+class RunBundleWriter:
+    """Helper to write terminal bundles for experiment runs."""
+
+    def __init__(self, run_dir: Path, run_spec: RunSpec, dataset_id: str):
+        self.run_dir = run_dir
+        self.run_spec = run_spec
+        self.dataset_id = dataset_id
+
+    def write_success_bundle(self, metrics: dict) -> None:
+        self._write_common_files()
+        write_metrics(self.run_dir, metrics)
+        write_report(self.run_dir, metrics, self.run_spec, self.dataset_id)
+        write_status(self.run_dir, "succeeded", "metric-search contrastive learning workload completed")
+        self._finalize_artifacts_index()
+
+    def write_failure_bundle(self, exception: Exception, traceback_str: str) -> None:
+        self._write_common_files()
+        write_error(self.run_dir, exception, traceback_str)
+        append_log(self.run_dir, f"ERROR: {exception}")
+        append_log(self.run_dir, traceback_str)
+        write_status(self.run_dir, "failed", f"metric-search workload failed: {exception}")
+        self._finalize_artifacts_index()
+
+    def _write_common_files(self) -> None:
+        write_text(
+            self.run_dir / "config.json",
+            json.dumps(json.loads((self.run_dir / "config.json").read_text()), indent=2, sort_keys=True) + "\n",
+        )
+        write_text(
+            self.run_dir / "run_manifest.json",
+            json.dumps(self.run_spec.to_dict(), indent=2, sort_keys=True) + "\n",
+        )
+        write_text(self.run_dir / "run_spec.json", json.dumps(self.run_spec.to_dict(), indent=2, sort_keys=True) + "\n")
+        append_log(self.run_dir, f"INFO: experiment {'completed' if (self.run_dir / 'metrics.json').exists() else 'failed'}")
+
+    def _finalize_artifacts_index(self) -> None:
+        artifacts_index = build_artifacts_index(self.run_dir)
+        write_text(self.run_dir / "artifacts_index.json", json.dumps(artifacts_index, indent=2, sort_keys=True) + "\n")
+
+
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -148,51 +242,23 @@ def main() -> None:
     run_spec.write_json(run_dir / "run_spec.json")
     write_text(run_dir / "config.json", json.dumps(config, indent=2, sort_keys=True) + "\n")
     write_text(run_dir / "run_manifest.json", json.dumps(run_spec.to_dict(), indent=2, sort_keys=True) + "\n")
-    write_text(run_dir / "logs" / "runner.log", "INFO metric-search run started\n")
-    
+    append_log(run_dir, "INFO metric-search run started")
+
     try:
         metrics = run_contrastive_experiment(run_spec, run_dir)
     except Exception as e:
         print(f"Error running experiment: {e}", file=sys.stderr)
         import traceback
-        traceback.print_exc(file=sys.stderr)
-        metrics = {}
-    
-    print(f"Metrics after run: {metrics}", file=sys.stderr)
-    write_text(
-        run_dir / "report.md",
-        (
-            f"# Contrastive Learning Report\n\n"
-            f"- run_id: `{run_spec.run_id}`\n"
-            f"- search_space_id: `{run_spec.search_space_id}`\n"
-            f"- dataset_id: `{dataset_id}`\n"
-            f"- grouped_recall_at_k: `{metrics['grouped_recall_at_k']}`\n"
-            f"- opis: `{metrics['opis']}`\n"
-            f"- ami: `{metrics['adjusted_mutual_info']}`\n"
-            f"- ari: `{metrics['adjusted_rand_index']}`\n"
-            f"- nmi: `{metrics['normalized_mutual_info']}`\n"
-            f"- silhouette: `{metrics['silhouette_score']}`\n"
-            f"- composite_score: `{metrics['composite_score']}`\n"
-            f"- mode: real\n"
-        ),
-    )
-    write_text(
-        run_dir / "status.json",
-        json.dumps(
-            {
-                "run_id": run_spec.run_id,
-                "status": "succeeded",
-                "updated_at": utc_now_iso(),
-                "detail": "metric-search contrastive learning workload completed",
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-    )
-    artifacts_index = build_artifacts_index(run_dir)
-    write_text(run_dir / "artifacts_index.json", json.dumps(artifacts_index, indent=2, sort_keys=True) + "\n")
-    write_text(run_dir / "logs" / "runner.log", "INFO metric-search run completed\n")
+        tb_str = traceback.format_exc()
+        print(tb_str, file=sys.stderr)
+        bundle_writer = RunBundleWriter(run_dir, run_spec, dataset_id)
+        bundle_writer.write_failure_bundle(e, tb_str)
+        sys.exit(1)
+
+    append_log(run_dir, "INFO metric-search run completed")
+    bundle_writer = RunBundleWriter(run_dir, run_spec, dataset_id)
+    bundle_writer.write_success_bundle(metrics)
+
     print(f"run_id={run_spec.run_id}")
     print(f"metrics_path={run_dir / 'metrics.json'}")
     print(metrics)
