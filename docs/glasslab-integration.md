@@ -2,6 +2,9 @@
 
 This repo is the workload side of the system.
 
+For the current run-fabric follow-up plan, see
+`docs/glasslab-run-fabric-followups-2026-04.md`.
+
 Glasslab should own:
 
 - run creation
