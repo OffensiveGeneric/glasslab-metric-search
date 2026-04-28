@@ -24,10 +24,10 @@ def append_log(run_dir: Path, message: str) -> None:
         f.write(message + "\n")
 
 
-def write_status(run_dir: Path, status: str, detail: str = "") -> None:
+def write_status(run_dir: Path, status: str, run_id: str, detail: str = "") -> None:
     status_path = run_dir / "status.json"
     status_data = {
-        "run_id": run_dir.name,
+        "run_id": run_id,
         "status": status,
         "updated_at": utc_now_iso(),
         "detail": detail,
@@ -35,10 +35,10 @@ def write_status(run_dir: Path, status: str, detail: str = "") -> None:
     write_text(run_dir / "status.json", json.dumps(status_data, indent=2, sort_keys=True) + "\n")
 
 
-def write_error(run_dir: Path, exception: Exception, traceback_str: str) -> None:
+def write_error(run_dir: Path, exception: Exception, traceback_str: str, run_id: str) -> None:
     error_path = run_dir / "error.json"
     error_data = {
-        "run_id": run_dir.name,
+        "run_id": run_id,
         "exception_type": type(exception).__name__,
         "message": str(exception),
         "traceback": traceback_str,
@@ -83,15 +83,15 @@ class RunBundleWriter:
         self._write_common_files()
         write_metrics(self.run_dir, metrics)
         write_report(self.run_dir, metrics, self.run_spec, self.dataset_id)
-        write_status(self.run_dir, "succeeded", "metric-search contrastive learning workload completed")
+        write_status(self.run_dir, "succeeded", self.run_spec.run_id, "metric-search contrastive learning workload completed")
         self._finalize_artifacts_index()
 
     def write_failure_bundle(self, exception: Exception, traceback_str: str) -> None:
         self._write_common_files()
-        write_error(self.run_dir, exception, traceback_str)
+        write_error(self.run_dir, exception, traceback_str, self.run_spec.run_id)
         append_log(self.run_dir, f"ERROR: {exception}")
         append_log(self.run_dir, traceback_str)
-        write_status(self.run_dir, "failed", f"metric-search workload failed: {exception}")
+        write_status(self.run_dir, "failed", self.run_spec.run_id, f"metric-search workload failed: {exception}")
         self._finalize_artifacts_index()
 
     def _write_common_files(self) -> None:

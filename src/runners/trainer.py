@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -17,11 +16,6 @@ from src.data.dataset import get_dataloaders
 from src.losses.losses import SupervisedContrastiveLoss, TripletLoss
 from src.models.backbone import ModelFactory
 from src.metrics.metrics import AdvancedMetrics
-
-
-def _score_from_payload(payload: dict[str, Any], salt: str) -> float:
-    digest = hashlib.sha256((salt + json.dumps(payload, sort_keys=True)).encode("utf-8")).hexdigest()
-    return int(digest[:8], 16) / 0xFFFFFFFF
 
 
 def train_epoch(
@@ -124,6 +118,7 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
 
     if run_spec.config:
         from src.config import DataConfig, AugmentationConfig, LossConfig, ModelConfig, TrainingConfig, HPOConfig, EvaluationConfig, L2ANCConfig
+        
         for key, value in run_spec.config.items():
             if key == "data":
                 if isinstance(config.data, DataConfig):
@@ -167,6 +162,20 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
                     config.l2anc = L2ANCConfig(**value)
             elif hasattr(config, key):
                 setattr(config, key, value)
+        
+        flat_config_map = {
+            "backbone_name": lambda v: setattr(config.model, "backbones", [v] if isinstance(v, str) else v),
+            "loss_name": lambda v: None,
+            "batch_size": lambda v: setattr(config.training, "batch_size", v),
+            "learning_rate": lambda v: setattr(config.training, "learning_rate", v),
+            "max_epochs": lambda v: setattr(config.training, "epochs", v),
+            "temperature": lambda v: config.loss.contrastive.__setitem__("temperature", v) if isinstance(config.loss.contrastive, dict) else None,
+        }
+        
+        for key, value in run_spec.config.items():
+            if key not in ["data", "augmentation", "loss", "model", "training", "hpo", "evaluation", "l2anc"]:
+                if key in flat_config_map:
+                    flat_config_map[key](value)
 
     dataloaders = get_dataloaders(config)
     train_loader = dataloaders["train_seen_0"]
@@ -193,6 +202,8 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
     for epoch in range(num_epochs):
         epoch_loss = train_epoch(model, train_loader, loss_fn, optimizer, device, max_train_batches)
         print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss:.4f}")
+    
+    max_eval_batches = run_spec.budget.max_eval_batches if run_spec.budget.max_eval_batches is not None else 100
 
     # Save checkpoints
     checkpoints_dir = output_dir / "checkpoints"
@@ -203,39 +214,82 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
     embeddings_dir = output_dir / "embeddings"
     embeddings_dir.mkdir(parents=True, exist_ok=True)
     
-    test_seen_embeddings = []
-    test_seen_labels = []
-    test_unseen_embeddings = []
-    test_unseen_labels = []
+    def save_embeddings_for_loader(dataloader, name):
+        if dataloader is None:
+            return
+        
+        all_embeddings = []
+        all_labels = []
+        
+        with torch.no_grad():
+            for batch_idx, (images, labels) in enumerate(dataloader):
+                if batch_idx >= max_eval_batches:
+                    break
+                images = images.to(device)
+                embeddings = model(images)
+                all_embeddings.append(embeddings.cpu())
+                all_labels.append(labels)
+        
+        if all_embeddings:
+            torch.save(torch.cat(all_embeddings), embeddings_dir / f"{name}_embeddings.pt")
+            torch.save(torch.cat(all_labels), embeddings_dir / f"{name}_labels.pt")
     
+    val_seen_loader = dataloaders.get("val_seen_0")
     test_seen_loader = dataloaders.get("test_seen_0")
     test_unseen_loader = dataloaders.get("test_unseen_0")
     
-    model.eval()
-    with torch.no_grad():
-        if test_seen_loader is not None:
-            for images, labels in test_seen_loader:
-                images = images.to(device)
-                embeddings = model(images)
-                test_seen_embeddings.append(embeddings.cpu())
-                test_seen_labels.append(labels)
-        
-        if test_unseen_loader is not None:
-            for images, labels in test_unseen_loader:
-                images = images.to(device)
-                embeddings = model(images)
-                test_unseen_embeddings.append(embeddings.cpu())
-                test_unseen_labels.append(labels)
-    
-    if test_seen_embeddings:
-        torch.save(torch.cat(test_seen_embeddings), embeddings_dir / "test_seen_embeddings.pt")
-        torch.save(torch.cat(test_seen_labels), embeddings_dir / "test_seen_labels.pt")
-    
-    if test_unseen_embeddings:
-        torch.save(torch.cat(test_unseen_embeddings), embeddings_dir / "test_unseen_embeddings.pt")
-        torch.save(torch.cat(test_unseen_labels), embeddings_dir / "test_unseen_labels.pt")
+    save_embeddings_for_loader(val_seen_loader, "val_seen")
+    save_embeddings_for_loader(test_seen_loader, "test_seen")
+    save_embeddings_for_loader(test_unseen_loader, "test_unseen")
 
-    metrics = evaluate_metrics(model, dataloaders, device, config)
+    # Compute metrics for each split
+    def compute_split_metrics(model, dataloaders, device, config, split_name):
+        split_key = f"{split_name}_0"
+        dataloader = dataloaders.get(split_key)
+        if dataloader is None:
+            return {}
+        
+        all_embeddings = []
+        all_labels = []
+        
+        with torch.no_grad():
+            for batch_idx, (images, labels) in enumerate(dataloader):
+                if batch_idx >= max_eval_batches:
+                    break
+                images = images.to(device)
+                embeddings = model(images)
+                all_embeddings.append(embeddings.cpu())
+                all_labels.append(labels)
+        
+        if not all_embeddings:
+            return {}
+        
+        embeddings = torch.cat(all_embeddings)
+        labels = torch.cat(all_labels)
+        
+        metrics_fn = AdvancedMetrics(config)
+        split_metrics = metrics_fn.compute_all_metrics(embeddings, labels)
+        
+        prefixed_metrics = {}
+        for key, value in split_metrics.items():
+            prefixed_metrics[f"{split_name}_{key}"] = value
+        
+        return prefixed_metrics
+    
+    val_seen_metrics = compute_split_metrics(model, dataloaders, device, config, "val_seen")
+    test_seen_metrics = compute_split_metrics(model, dataloaders, device, config, "test_seen")
+    test_unseen_metrics = compute_split_metrics(model, dataloaders, device, config, "test_unseen")
+    
+    all_metrics = {}
+    all_metrics.update(val_seen_metrics)
+    all_metrics.update(test_seen_metrics)
+    all_metrics.update(test_unseen_metrics)
+    
+    if test_seen_metrics and test_unseen_metrics:
+        generalization_gap_grouped_recall_at_k = test_seen_metrics.get("test_seen_grouped_recall_at_k", 0) - test_unseen_metrics.get("test_unseen_grouped_recall_at_k", 0)
+        all_metrics["generalization_gap_grouped_recall_at_k"] = generalization_gap_grouped_recall_at_k
+
+    metrics = all_metrics
 
     metrics["run_id"] = run_spec.run_id
     metrics["dataset_id"] = run_spec.dataset.dataset_id
