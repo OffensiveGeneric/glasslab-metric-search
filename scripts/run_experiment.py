@@ -22,6 +22,29 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def append_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(content)
+
+
+def write_status(run_dir: Path, run_id: str, status: str, detail: str) -> None:
+    write_text(
+        run_dir / "status.json",
+        json.dumps(
+            {
+                "run_id": run_id,
+                "status": status,
+                "updated_at": utc_now_iso(),
+                "detail": detail,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
+
+
 def build_artifacts_index(run_dir: Path) -> dict:
     artifacts = []
     for path in sorted(run_dir.rglob("*")):
@@ -150,41 +173,37 @@ def main() -> None:
     write_text(run_dir / "run_manifest.json", json.dumps(run_spec.to_dict(), indent=2, sort_keys=True) + "\n")
     write_text(run_dir / "logs" / "runner.log", "INFO metric-search run started\n")
     
-    metrics = run_contrastive_experiment(run_spec, run_dir)
-    write_text(
-        run_dir / "report.md",
-        (
-            f"# Contrastive Learning Report\n\n"
-            f"- run_id: `{run_spec.run_id}`\n"
-            f"- search_space_id: `{run_spec.search_space_id}`\n"
-            f"- dataset_id: `{dataset_id}`\n"
-            f"- grouped_recall_at_k: `{metrics['grouped_recall_at_k']}`\n"
-            f"- opis: `{metrics['opis']}`\n"
-            f"- ami: `{metrics['adjusted_mutual_info']}`\n"
-            f"- ari: `{metrics['adjusted_rand_index']}`\n"
-            f"- nmi: `{metrics['normalized_mutual_info']}`\n"
-            f"- silhouette: `{metrics['silhouette_score']}`\n"
-            f"- composite_score: `{metrics['composite_score']}`\n"
-            f"- mode: real\n"
-        ),
-    )
-    write_text(
-        run_dir / "status.json",
-        json.dumps(
-            {
-                "run_id": run_spec.run_id,
-                "status": "succeeded",
-                "updated_at": utc_now_iso(),
-                "detail": "metric-search contrastive learning workload completed",
-            },
-            indent=2,
-            sort_keys=True,
+    try:
+        metrics = run_contrastive_experiment(run_spec, run_dir)
+        write_text(
+            run_dir / "report.md",
+            (
+                f"# Contrastive Learning Report\n\n"
+                f"- run_id: `{run_spec.run_id}`\n"
+                f"- search_space_id: `{run_spec.search_space_id}`\n"
+                f"- dataset_id: `{dataset_id}`\n"
+                f"- grouped_recall_at_k: `{metrics['grouped_recall_at_k']}`\n"
+                f"- opis: `{metrics['opis']}`\n"
+                f"- ami: `{metrics['adjusted_mutual_info']}`\n"
+                f"- ari: `{metrics['adjusted_rand_index']}`\n"
+                f"- nmi: `{metrics['normalized_mutual_info']}`\n"
+                f"- silhouette: `{metrics['silhouette_score']}`\n"
+                f"- composite_score: `{metrics['composite_score']}`\n"
+                f"- mode: real\n"
+            ),
         )
-        + "\n",
-    )
-    artifacts_index = build_artifacts_index(run_dir)
-    write_text(run_dir / "artifacts_index.json", json.dumps(artifacts_index, indent=2, sort_keys=True) + "\n")
-    write_text(run_dir / "logs" / "runner.log", "INFO metric-search run completed\n")
+        write_status(run_dir, run_spec.run_id, "succeeded", "metric-search contrastive learning workload completed")
+        append_text(run_dir / "logs" / "runner.log", "INFO metric-search run completed\n")
+    except Exception as exc:
+        write_status(run_dir, run_spec.run_id, "failed", f"{type(exc).__name__}: {exc}")
+        append_text(
+            run_dir / "logs" / "runner.log",
+            f"ERROR metric-search run failed: {type(exc).__name__}: {exc}\n",
+        )
+        raise
+    finally:
+        artifacts_index = build_artifacts_index(run_dir)
+        write_text(run_dir / "artifacts_index.json", json.dumps(artifacts_index, indent=2, sort_keys=True) + "\n")
     print(f"run_id={run_spec.run_id}")
     print(f"metrics_path={run_dir / 'metrics.json'}")
     print(metrics)

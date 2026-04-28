@@ -201,8 +201,8 @@ When a metric-search run is submitted:
 3. On success, runner ingests artifacts back to workflow-api:
    - `status.json` → run status
    - `metrics.json` → metrics storage (Postgres)
-   - `artifacts_index.json` → artifact URIs (MinIO)
-   - Other artifacts → shared storage
+   - `artifacts_index.json` → artifact references
+   - Other artifacts → shared artifacts PVC on g-nas `.207`
 
 ## Implementation Checklist
 
