@@ -79,27 +79,23 @@ class AdvancedMetrics:
             if len(group_embeddings) == 0:
                 continue
             
-            print(f"Time {time.time()}: Building FAISS index", file=sys.stderr, flush=True)
-            # Build FAISS index
-            dimension = group_embeddings.shape[1]
-            print(f"Time {time.time()}: Creating FAISS index with dimension {dimension}", file=sys.stderr, flush=True)
-            index = faiss.IndexFlatL2(dimension)
-            print(f"Time {time.time()}: Index created", file=sys.stderr, flush=True)
-            print(f"Time {time.time()}: Adding embeddings (shape {group_embeddings.shape}) to index", file=sys.stderr, flush=True)
-            index.add(group_embeddings.astype("float32"))
-            print(f"Time {time.time()}: Added to index", file=sys.stderr, flush=True)
+            print(f"Time {time.time()}: Computing pairwise distances", file=sys.stderr, flush=True)
+            # Compute pairwise distances (manual approach for macOS)
+            n = len(group_embeddings)
+            distances = np.zeros((n, n))
+            for i in range(n):
+                diff = group_embeddings - group_embeddings[i]
+                distances[i] = np.sqrt(np.sum(diff ** 2, axis=1))
             
-            # Query for each sample
-            print(f"Time {time.time()}: Searching with k={k+1}...", file=sys.stderr, flush=True)
-            distances, indices = index.search(
-                group_embeddings.astype("float32"), k + 1
-            )
-            print(f"Time {time.time()}: Search done", file=sys.stderr, flush=True)
+            print(f"Time {time.time()}: Distances computed, finding nearest neighbors", file=sys.stderr, flush=True)
+            # Find k+1 nearest neighbors for each sample (including self)
+            indices = np.argsort(distances, axis=1)[:, :k+1]
+            print(f"Time {time.time()}: Nearest neighbors found", file=sys.stderr, flush=True)
             
             # Calculate recall@k
             recall_count = 0
             for i in range(len(group_embeddings)):
-                neighbor_labels = group_labels[indices[i][1:k+1]]  # Skip self
+                neighbor_labels = group_labels[indices[i][1:k+1]]  # Skip self (index 0)
                 if group_labels[i] in neighbor_labels:
                     recall_count += 1
                     
