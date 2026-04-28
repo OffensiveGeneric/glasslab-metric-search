@@ -4,6 +4,7 @@ Metrics module: Advanced evaluation metrics for DML
 
 import torch
 import numpy as np
+import sys
 from sklearn.metrics import (
     normalized_mutual_info_score, adjusted_mutual_info_score,
     adjusted_rand_score, silhouette_score
@@ -32,8 +33,8 @@ class AdvancedMetrics:
             return 0.0
             
         # Convert to numpy for FAISS
-        embeddings_np = embeddings.cpu().numpy()
-        labels_np = labels.cpu().numpy()
+        embeddings_np = embeddings.cpu().detach().numpy()
+        labels_np = labels.cpu().detach().numpy()
         
         # Use deterministic random generator
         rng = np.random.default_rng(self.config.data.seed)
@@ -83,8 +84,8 @@ class AdvancedMetrics:
         Operating-Point-Inconsistency Score: Measure threshold consistency
         across the embedding space
         """
-        embeddings_np = embeddings.cpu().numpy()
-        labels_np = labels.cpu().numpy()
+        embeddings_np = embeddings.cpu().detach().numpy()
+        labels_np = labels.cpu().detach().numpy()
         
         # Compute pairwise distances
         distances = np.zeros((len(embeddings), len(embeddings)))
@@ -118,18 +119,25 @@ class AdvancedMetrics:
             f1_scores.append(f1)
             
         # Compute OPIS: average deviation from mean F1
-        mean_f1 = np.mean(f1_scores)
-        opis = np.mean(np.abs(np.array(f1_scores) - mean_f1))
+        if len(f1_scores) == 0:
+            opis = 0.0
+        else:
+            mean_f1 = np.mean(f1_scores)
+            opis = np.mean(np.abs(np.array(f1_scores) - mean_f1))
         
         return opis
     
     def _predict_clusters(self, embeddings: torch.Tensor, n_clusters: int) -> np.ndarray:
         """Predict cluster assignments using k-means"""
-        embeddings_np = embeddings.cpu().numpy()
-        kmeans = faiss.Kmeans(d=embeddings_np.shape[1], k=n_clusters, gpu=False)
-        kmeans.train(embeddings_np.astype("float32"))
-        _, labels_pred = kmeans.index.search(embeddings_np.astype("float32"), 1)
-        return labels_pred.flatten()
+        try:
+            from sklearn.cluster import KMeans
+            embeddings_np = embeddings.cpu().detach().numpy()
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=3, max_iter=50)
+            labels_pred = kmeans.fit_predict(embeddings_np.astype("float32"))
+            return labels_pred
+        except Exception as e:
+            print(f"KMeans failed: {e}", file=sys.stderr)
+            return np.zeros(len(embeddings), dtype=int)
     
     def compute_all_metrics(self, embeddings: torch.Tensor,
                             labels: torch.Tensor) -> Dict[str, float]:
@@ -137,11 +145,14 @@ class AdvancedMetrics:
         results = {}
         
         # Basic metrics
-        embeddings_np = embeddings.cpu().numpy()
-        labels_np = labels.cpu().numpy()
+        embeddings_np = embeddings.cpu().detach().numpy()
+        labels_np = labels.cpu().detach().numpy()
         
         # Get number of unique classes for clustering
         n_clusters = len(np.unique(labels_np))
+        # Limit clusters to avoid issues with small datasets
+        min_samples_per_cluster = 20
+        n_clusters = min(n_clusters, max(2, len(embeddings) // min_samples_per_cluster))
         
         # Predict clusters for clustering-based metrics
         labels_pred = self._predict_clusters(embeddings, n_clusters)

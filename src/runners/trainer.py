@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict
 
@@ -112,6 +113,7 @@ def evaluate_metrics(
 
 def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
     """Run a real training experiment on CIFAR-100."""
+    print(f"Starting run_real_experiment", file=sys.stderr)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     config_path = output_dir / "config.yaml"
@@ -187,8 +189,9 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
     )
 
     num_epochs = min(config.training.epochs, 2)
+    max_train_batches = run_spec.budget.max_train_batches if run_spec.budget.max_train_batches is not None else 100
     for epoch in range(num_epochs):
-        epoch_loss = train_epoch(model, train_loader, loss_fn, optimizer, device)
+        epoch_loss = train_epoch(model, train_loader, loss_fn, optimizer, device, max_train_batches)
         print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss:.4f}")
 
     # Save checkpoints
@@ -254,6 +257,7 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
         4,
     )
 
+    print(f"About to write metrics.json", file=sys.stderr)
     metrics["run_id"] = run_spec.run_id
     metrics["dataset_id"] = run_spec.dataset.dataset_id
     metrics["mode"] = "real"
