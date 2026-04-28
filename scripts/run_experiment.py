@@ -53,20 +53,42 @@ def write_metrics(run_dir: Path, metrics: dict) -> None:
 
 def write_report(run_dir: Path, metrics: dict, run_spec: RunSpec, dataset_id: str) -> None:
     report_path = run_dir / "report.md"
+    
+    # Extract test_unseen metrics for top-level summary
+    test_unseen_prefix = "test_unseen_"
+    summary_metrics = {}
+    for key, value in metrics.items():
+        if key.startswith(test_unseen_prefix):
+            summary_key = key[len(test_unseen_prefix):]
+            summary_metrics[summary_key] = value
+    
+    grouped_recall_at_k = summary_metrics.get('grouped_recall_at_k')
+    opis = summary_metrics.get('opis')
+    adjusted_mutual_info = summary_metrics.get('adjusted_mutual_info')
+    adjusted_rand_index = summary_metrics.get('adjusted_rand_index')
+    normalized_mutual_info = summary_metrics.get('normalized_mutual_info')
+    silhouette_score = summary_metrics.get('silhouette_score')
+    composite_score = summary_metrics.get('composite_score')
+    
     report_content = (
         f"# Contrastive Learning Report\n\n"
         f"- run_id: `{run_spec.run_id}`\n"
         f"- search_space_id: `{run_spec.search_space_id}`\n"
         f"- dataset_id: `{dataset_id}`\n"
-        f"- grouped_recall_at_k: `{metrics.get('grouped_recall_at_k')}`\n"
-        f"- opis: `{metrics.get('opis')}`\n"
-        f"- adjusted_mutual_info: `{metrics.get('adjusted_mutual_info')}`\n"
-        f"- adjusted_rand_index: `{metrics.get('adjusted_rand_index')}`\n"
-        f"- normalized_mutual_info: `{metrics.get('normalized_mutual_info')}`\n"
-        f"- silhouette_score: `{metrics.get('silhouette_score')}`\n"
-        f"- composite_score: `{metrics.get('composite_score')}`\n"
+        f"- grouped_recall_at_k: `{grouped_recall_at_k}`\n"
+        f"- opis: `{opis}`\n"
+        f"- adjusted_mutual_info: `{adjusted_mutual_info}`\n"
+        f"- adjusted_rand_index: `{adjusted_rand_index}`\n"
+        f"- normalized_mutual_info: `{normalized_mutual_info}`\n"
+        f"- silhouette_score: `{silhouette_score}`\n"
+        f"- composite_score: `{composite_score}`\n"
         f"- mode: {metrics.get('mode', 'real')}\n"
         f"- simulated: {metrics.get('simulated', False)}\n"
+        f"\n## Per-Split Metrics\n\n"
+        f"- val_seen_grouped_recall_at_k: `{metrics.get('val_seen_grouped_recall_at_k', 'N/A')}`\n"
+        f"- test_seen_grouped_recall_at_k: `{metrics.get('test_seen_grouped_recall_at_k', 'N/A')}`\n"
+        f"- test_unseen_grouped_recall_at_k: `{metrics.get('test_unseen_grouped_recall_at_k', 'N/A')}`\n"
+        f"- generalization_gap_grouped_recall_at_k: `{metrics.get('generalization_gap_grouped_recall_at_k', 'N/A')}`\n"
     )
     write_text(report_path, report_content)
 
@@ -212,6 +234,7 @@ def main() -> None:
     budget_config = config["budget"].copy()
     if args.epochs is not None:
         budget_config["max_epochs"] = args.epochs
+        experiment_config["max_epochs"] = args.epochs
     
     budget = Budget(**budget_config)
     if args.max_train_batches is not None:
@@ -243,6 +266,10 @@ def main() -> None:
     write_text(run_dir / "config.json", json.dumps(config, indent=2, sort_keys=True) + "\n")
     write_text(run_dir / "run_manifest.json", json.dumps(run_spec.to_dict(), indent=2, sort_keys=True) + "\n")
     append_log(run_dir, "INFO metric-search run started")
+    
+    force_failure = os.environ.get("GLASSLAB_FORCE_TRAINER_FAILURE", "").strip()
+    if force_failure:
+        raise RuntimeError(f"GLASSLAB_FORCE_TRAINER_FAILURE is set: {force_failure}")
 
     try:
         metrics = run_contrastive_experiment(run_spec, run_dir)

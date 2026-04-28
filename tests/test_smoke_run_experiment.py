@@ -45,19 +45,27 @@ def test_run_experiment_artifacts(tmp_path):
     assert (output_dir / "metrics.json").exists()
     metrics_json = json.loads((output_dir / "metrics.json").read_text())
     assert metrics_json["run_id"] == status_json["run_id"]
+    # Check split-prefixed metrics
+    assert "test_unseen_grouped_recall_at_k" in metrics_json
+    assert "test_unseen_opis" in metrics_json
+    assert "test_unseen_adjusted_mutual_info" in metrics_json
+    assert "test_unseen_adjusted_rand_index" in metrics_json
+    assert "test_unseen_normalized_mutual_info" in metrics_json
+    assert "test_unseen_silhouette_score" in metrics_json
+    # Check top-level aliases
     assert "grouped_recall_at_k" in metrics_json
     assert "opis" in metrics_json
     assert "adjusted_mutual_info" in metrics_json
     assert "adjusted_rand_index" in metrics_json
     assert "normalized_mutual_info" in metrics_json
     assert "silhouette_score" in metrics_json
+    assert "generalization_gap_grouped_recall_at_k" in metrics_json
 
 
-def test_run_experiment_failure_bundle(tmp_path, monkeypatch):
-    """Test that a failing CLI run produces failure bundle"""
-    import yaml
-    
+def test_run_experiment_failure_bundle(tmp_path):
+    """Test that a failing CLI run produces failure bundle via invalid config"""
     config_path = tmp_path / "bad-config.yaml"
+    # Create a config that will fail during validation
     config = {
         "workflow_family": "contrastive",
         "search_space_id": "cifar100_contrastive_v0",
@@ -80,36 +88,37 @@ def test_run_experiment_failure_bundle(tmp_path, monkeypatch):
     output_dir = tmp_path / "test-output-failure"
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    def fake_trainer(*args, **kwargs):
-        raise RuntimeError("Simulated trainer failure")
+    # Use environment variable to force trainer failure
+    import os
+    os.environ["GLASSLAB_FORCE_TRAINER_FAILURE"] = "1"
     
-    monkeypatch.setattr("src.runners.trainer.run_real_experiment", fake_trainer)
-    
-    result = subprocess.run(
-        [
-            sys.executable,
-            "scripts/run_experiment.py",
-            "--config",
-            str(config_path),
-            "--output-dir",
-            str(output_dir),
-            "--epochs",
-            "1",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    
-    assert result.returncode != 0
-    assert result.returncode != 0
-    
-    assert (output_dir / "status.json").exists()
-    status_json = json.loads((output_dir / "status.json").read_text())
-    assert status_json["status"] == "failed"
-    
-    assert (output_dir / "error.json").exists()
-    error_json = json.loads((output_dir / "error.json").read_text())
-    assert error_json["exception_type"] == "RuntimeError"
-    assert "Simulated trainer failure" in error_json["message"]
-    
-    assert (output_dir / "logs" / "runner.log").exists()
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/run_experiment.py",
+                "--config",
+                str(config_path),
+                "--output-dir",
+                str(output_dir),
+                "--epochs",
+                "1",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        
+        assert result.returncode != 0
+        
+        assert (output_dir / "status.json").exists()
+        status_json = json.loads((output_dir / "status.json").read_text())
+        assert status_json["status"] == "failed"
+        
+        assert (output_dir / "error.json").exists()
+        error_json = json.loads((output_dir / "error.json").read_text())
+        assert error_json["exception_type"] == "RuntimeError"
+        assert "GLASSLAB_FORCE_TRAINER_FAILURE" in error_json["message"]
+        
+        assert (output_dir / "logs" / "runner.log").exists()
+    finally:
+        del os.environ["GLASSLAB_FORCE_TRAINER_FAILURE"]

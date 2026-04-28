@@ -190,6 +190,14 @@ class AdvancedMetrics:
             4,
         )
         
+        # Add top-level summary aliases (for backward compatibility)
+        results["grouped_recall_at_k"] = results.get("grouped_recall_at_k", 0)
+        results["opis"] = results.get("opis", 0)
+        results["adjusted_mutual_info"] = results.get("adjusted_mutual_info", 0)
+        results["adjusted_rand_index"] = results.get("adjusted_rand_index", 0)
+        results["normalized_mutual_info"] = results.get("normalized_mutual_info", 0)
+        results["silhouette_score"] = results.get("silhouette_score", 0)
+        
         return results
 
 

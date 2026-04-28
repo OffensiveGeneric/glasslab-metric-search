@@ -176,6 +176,10 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
             if key not in ["data", "augmentation", "loss", "model", "training", "hpo", "evaluation", "l2anc"]:
                 if key in flat_config_map:
                     flat_config_map[key](value)
+        
+        loss_name = run_spec.config.get("loss_name", "contrastive")
+        if loss_name != "contrastive":
+            raise NotImplementedError(f"Only contrastive loss is supported in real mode, got: {loss_name}")
 
     dataloaders = get_dataloaders(config)
     train_loader = dataloaders["train_seen_0"]
@@ -197,7 +201,7 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
         weight_decay=config.training.weight_decay,
     )
 
-    num_epochs = min(config.training.epochs, 2)
+    num_epochs = min(run_spec.budget.max_epochs if run_spec.budget.max_epochs is not None else config.training.epochs, 2)
     max_train_batches = run_spec.budget.max_train_batches if run_spec.budget.max_train_batches is not None else 100
     for epoch in range(num_epochs):
         epoch_loss = train_epoch(model, train_loader, loss_fn, optimizer, device, max_train_batches)
@@ -210,44 +214,14 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), checkpoints_dir / "final_model.pt")
     
-    # Save embeddings
+    # Save embeddings dir
     embeddings_dir = output_dir / "embeddings"
     embeddings_dir.mkdir(parents=True, exist_ok=True)
     
-    def save_embeddings_for_loader(dataloader, name):
+    # Collect embeddings once for all splits
+    def collect_embeddings_for_loader(dataloader, name):
         if dataloader is None:
-            return
-        
-        all_embeddings = []
-        all_labels = []
-        
-        with torch.no_grad():
-            for batch_idx, (images, labels) in enumerate(dataloader):
-                if batch_idx >= max_eval_batches:
-                    break
-                images = images.to(device)
-                embeddings = model(images)
-                all_embeddings.append(embeddings.cpu())
-                all_labels.append(labels)
-        
-        if all_embeddings:
-            torch.save(torch.cat(all_embeddings), embeddings_dir / f"{name}_embeddings.pt")
-            torch.save(torch.cat(all_labels), embeddings_dir / f"{name}_labels.pt")
-    
-    val_seen_loader = dataloaders.get("val_seen_0")
-    test_seen_loader = dataloaders.get("test_seen_0")
-    test_unseen_loader = dataloaders.get("test_unseen_0")
-    
-    save_embeddings_for_loader(val_seen_loader, "val_seen")
-    save_embeddings_for_loader(test_seen_loader, "test_seen")
-    save_embeddings_for_loader(test_unseen_loader, "test_unseen")
-
-    # Compute metrics for each split
-    def compute_split_metrics(model, dataloaders, device, config, split_name):
-        split_key = f"{split_name}_0"
-        dataloader = dataloaders.get(split_key)
-        if dataloader is None:
-            return {}
+            return None, None
         
         all_embeddings = []
         all_labels = []
@@ -262,10 +236,25 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
                 all_labels.append(labels)
         
         if not all_embeddings:
-            return {}
+            return None, None
         
         embeddings = torch.cat(all_embeddings)
         labels = torch.cat(all_labels)
+        
+        # Save embeddings
+        torch.save(embeddings, embeddings_dir / f"{name}_embeddings.pt")
+        torch.save(labels, embeddings_dir / f"{name}_labels.pt")
+        
+        return embeddings, labels
+    
+    val_seen_embeddings, val_seen_labels = collect_embeddings_for_loader(dataloaders.get("val_seen_0"), "val_seen")
+    test_seen_embeddings, test_seen_labels = collect_embeddings_for_loader(dataloaders.get("test_seen_0"), "test_seen")
+    test_unseen_embeddings, test_unseen_labels = collect_embeddings_for_loader(dataloaders.get("test_unseen_0"), "test_unseen")
+    
+    # Compute metrics from collected embeddings
+    def compute_split_metrics_from_embeddings(embeddings, labels, split_name, config):
+        if embeddings is None or labels is None:
+            return {}
         
         metrics_fn = AdvancedMetrics(config)
         split_metrics = metrics_fn.compute_all_metrics(embeddings, labels)
@@ -276,9 +265,9 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
         
         return prefixed_metrics
     
-    val_seen_metrics = compute_split_metrics(model, dataloaders, device, config, "val_seen")
-    test_seen_metrics = compute_split_metrics(model, dataloaders, device, config, "test_seen")
-    test_unseen_metrics = compute_split_metrics(model, dataloaders, device, config, "test_unseen")
+    val_seen_metrics = compute_split_metrics_from_embeddings(val_seen_embeddings, val_seen_labels, "val_seen", config)
+    test_seen_metrics = compute_split_metrics_from_embeddings(test_seen_embeddings, test_seen_labels, "test_seen", config)
+    test_unseen_metrics = compute_split_metrics_from_embeddings(test_unseen_embeddings, test_unseen_labels, "test_unseen", config)
     
     all_metrics = {}
     all_metrics.update(val_seen_metrics)
