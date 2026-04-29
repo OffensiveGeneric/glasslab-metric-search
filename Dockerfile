@@ -11,7 +11,7 @@ COPY pyproject.toml /app/pyproject.toml
 COPY README.md /app/README.md
 
 RUN pip install --no-cache-dir --break-system-packages . \
-    && pip install --no-cache-dir --break-system-packages syne-tune 'ray[tune]'
+    && pip install --no-cache-dir --break-system-packages syne-tune 'ray[tune]' transformers
 
 COPY search /app/search
 COPY src /app/src
