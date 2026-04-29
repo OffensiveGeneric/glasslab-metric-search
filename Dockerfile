@@ -10,7 +10,8 @@ RUN apt-get update && apt-get install -y curl g++ && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml /app/pyproject.toml
 COPY README.md /app/README.md
 
-RUN pip install --no-cache-dir --break-system-packages .
+RUN pip install --no-cache-dir --break-system-packages . \
+    && pip install --no-cache-dir --break-system-packages syne-tune 'ray[tune]'
 
 COPY search /app/search
 COPY src /app/src
