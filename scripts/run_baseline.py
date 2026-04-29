@@ -60,6 +60,10 @@ def get_random_embeddings(dataloaders: dict, device: str, max_eval_batches: int 
         if all_embeddings:
             random_embeddings[f"{split_name}_embeddings"] = torch.cat(all_embeddings)
             random_embeddings[f"{split_name}_labels"] = torch.cat(all_labels)
+            # Free memory
+            del all_embeddings
+            del all_labels
+            torch.cuda.empty_cache()
         else:
             random_embeddings[f"{split_name}_embeddings"] = None
             random_embeddings[f"{split_name}_labels"] = None
@@ -99,10 +103,17 @@ def get_frozen_resnet_embeddings(dataloaders: dict, device: str, max_eval_batche
                 embeddings = backbone(images)
                 all_embeddings.append(embeddings.cpu())
                 all_labels.append(labels)
+                # Free GPU memory after each batch
+                del embeddings
+                torch.cuda.empty_cache()
         
         if all_embeddings:
             embeddings_dict[f"{split_name}_embeddings"] = torch.cat(all_embeddings)
             embeddings_dict[f"{split_name}_labels"] = torch.cat(all_labels)
+            # Free memory
+            del all_embeddings
+            del all_labels
+            torch.cuda.empty_cache()
         else:
             embeddings_dict[f"{split_name}_embeddings"] = None
             embeddings_dict[f"{split_name}_labels"] = None
@@ -142,10 +153,17 @@ def get_frozen_dino_embeddings(dataloaders: dict, device: str, max_eval_batches:
                 embeddings = backbone(images)
                 all_embeddings.append(embeddings.cpu())
                 all_labels.append(labels)
+                # Free GPU memory after each batch
+                del embeddings
+                torch.cuda.empty_cache()
         
         if all_embeddings:
             embeddings_dict[f"{split_name}_embeddings"] = torch.cat(all_embeddings)
             embeddings_dict[f"{split_name}_labels"] = torch.cat(all_labels)
+            # Free memory
+            del all_embeddings
+            del all_labels
+            torch.cuda.empty_cache()
         else:
             embeddings_dict[f"{split_name}_embeddings"] = None
             embeddings_dict[f"{split_name}_labels"] = None
@@ -185,10 +203,17 @@ def get_frozen_clip_embeddings(dataloaders: dict, device: str, max_eval_batches:
                 embeddings = backbone(images)
                 all_embeddings.append(embeddings.cpu())
                 all_labels.append(labels)
+                # Free GPU memory after each batch
+                del embeddings
+                torch.cuda.empty_cache()
         
         if all_embeddings:
             embeddings_dict[f"{split_name}_embeddings"] = torch.cat(all_embeddings)
             embeddings_dict[f"{split_name}_labels"] = torch.cat(all_labels)
+            # Free memory
+            del all_embeddings
+            del all_labels
+            torch.cuda.empty_cache()
         else:
             embeddings_dict[f"{split_name}_embeddings"] = None
             embeddings_dict[f"{split_name}_labels"] = None
