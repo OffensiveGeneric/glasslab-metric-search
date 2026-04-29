@@ -18,7 +18,6 @@ dependencies = [
   "torchcp>=1.2.0",
   "syne-tune>=0.15.0",
   "ray[tune]>=2.55.0",
-  "numpy>=1.26.0",
   "pandas>=2.0.0",
   "tqdm>=4.65.0",
   "matplotlib>=3.10.8",
