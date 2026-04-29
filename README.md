@@ -39,6 +39,8 @@ scripts/
 docs/
 ├── cifar100-unseen-classes.md    # Main specification
 ├── evaluation-protocol.md        # Metrics documentation
+├── metric-search-evaluation-action-notes-2026-04-29.md
+│                                      # Current validation blockers and action plan
 └── statistical-validation.md     # Statistical tests
 
 benchmarks/
