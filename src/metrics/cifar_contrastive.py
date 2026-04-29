@@ -15,19 +15,47 @@ def grouped_recall_at_k(
     embeddings: np.ndarray,
     labels: np.ndarray,
     k: int = 10,
-    n_groups: int = 4,
-) -> float:
+    group_size: int = 10,  # FIXED: use fixed group size instead of num_groups
+) -> dict:
+    """Grouped Recall@K with fixed group size and gallery metadata.
+    
+    Args:
+        embeddings: Embedding array of shape (n_samples, embedding_dim)
+        labels: Label array of shape (n_samples,)
+        k: Number of nearest neighbors to consider
+        group_size: Fixed number of classes per group (default 10)
+    
+    Returns:
+        Dictionary with score and metadata about the evaluation gallery
+    """
     n_samples = len(labels)
-    samples_per_group = n_samples // n_groups
+    
+    # Calculate gallery properties
+    unique_labels = np.unique(labels)
+    gallery_size = n_samples
+    gallery_classes = len(unique_labels)
+    
+    # Determine group size (fixed, not based on num_groups)
+    actual_group_size = min(group_size, len(unique_labels))
+    num_groups = max(1, len(unique_labels) // actual_group_size)
+    
+    # Check if gallery is partial
+    samples_per_class = n_samples // len(unique_labels) if len(unique_labels) > 0 else 1
+    expected_full_samples = gallery_classes * samples_per_class
+    partial_gallery = gallery_size < expected_full_samples
     
     grouped_rk_scores = []
+    group_info = []
     
-    for i in range(n_groups):
-        start_idx = i * samples_per_group
-        end_idx = start_idx + samples_per_group
+    for i in range(num_groups):
+        start_idx = i * actual_group_size
+        end_idx = min(start_idx + actual_group_size, len(unique_labels))
+        group_labels_list = unique_labels[start_idx:end_idx]
         
-        group_embeddings = embeddings[start_idx:end_idx]
-        group_labels = labels[start_idx:end_idx]
+        # Filter embeddings and labels for this group
+        mask = np.isin(labels, group_labels_list)
+        group_embeddings = embeddings[mask]
+        group_labels_filtered = labels[mask]
         
         distances = np.linalg.norm(
             group_embeddings[:, np.newaxis] - group_embeddings[np.newaxis, :],
@@ -37,18 +65,36 @@ def grouped_recall_at_k(
         recall_scores = []
         for j in range(len(group_embeddings)):
             row_distances = distances[j]
-            row_labels = group_labels
+            row_labels = group_labels_filtered
             
             neighbor_indices = np.argsort(row_distances)[1:k+1]
             neighbor_labels = row_labels[neighbor_indices]
             
-            correct = np.sum(neighbor_labels == group_labels[j])
-            recall = correct / min(k, len(neighbor_labels))
+            correct = np.sum(neighbor_labels == group_labels_filtered[j])
+            recall = correct / min(k, len(neighbor_labels)) if len(neighbor_labels) > 0 else 0.0
             recall_scores.append(recall)
         
-        grouped_rk_scores.append(np.mean(recall_scores))
+        group_score = np.mean(recall_scores) if recall_scores else 0.0
+        grouped_rk_scores.append(group_score)
+        
+        group_info.append({
+            "group_idx": i,
+            "classes": list(group_labels_list),
+            "samples": len(group_embeddings),
+            "recall": group_score
+        })
     
-    return float(np.mean(grouped_rk_scores))
+    final_score = float(np.mean(grouped_rk_scores)) if grouped_rk_scores else 0.0
+    
+    return {
+        "score": final_score,
+        "num_groups": num_groups,
+        "group_size": actual_group_size,
+        "gallery_size": gallery_size,
+        "gallery_classes": gallery_classes,
+        "partial": partial_gallery,
+        "group_info": group_info
+    }
 
 
 def compute_opis(

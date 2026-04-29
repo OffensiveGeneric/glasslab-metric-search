@@ -32,15 +32,20 @@ class AdvancedMetrics:
         
     def grouped_recall_at_k(self, embeddings: torch.Tensor, 
                             labels: torch.Tensor,
-                            k: int = 5) -> float:
+                            k: int = 5,
+                            group_size: int = 10) -> dict:
         """
         Grouped Recall@K: Partition test set into non-overlapping groups
-        to make metric invariant to dataset size
+        to make metric invariant to dataset size.
+        
+        Fixed group size ensures consistent evaluation regardless of dataset size.
+        For CIFAR-100: 10 classes per group, creating 8 groups for 80 seen classes
+        or 2 groups for 20 unseen classes.
         """
         import time
         print(f"Time {time.time()}: grouped_recall_at_k starting", file=sys.stderr, flush=True)
         if len(embeddings) == 0:
-            return 0.0
+            return {"score": 0.0, "num_groups": 0, "gallery_size": 0, "gallery_classes": 0, "partial": True}
         
         print(f"Time {time.time()}: Converting to numpy", file=sys.stderr, flush=True)
         # Convert to numpy for FAISS
@@ -53,30 +58,62 @@ class AdvancedMetrics:
         rng = np.random.default_rng(self.config.data.seed)
         print(f"Time {time.time()}: rng created", file=sys.stderr, flush=True)
         
-        # Partition into groups
+        # Partition into groups with FIXED size
         unique_labels = np.unique(labels_np)
         print(f"Time {time.time()}: unique_labels, shape {unique_labels.shape}", file=sys.stderr, flush=True)
         rng.shuffle(unique_labels)
         print(f"Time {time.time()}: shuffle done", file=sys.stderr, flush=True)
         
-        group_size = max(1, len(unique_labels) // self.num_groups)
-        print(f"Time {time.time()}: group_size = {group_size}", file=sys.stderr, flush=True)
-        groups = [unique_labels[i:i+group_size] for i in range(0, len(unique_labels), group_size)]
-        print(f"Time {time.time()}: groups created, {len(groups)} groups", file=sys.stderr, flush=True)
+        # FIXED GROUP SIZE: 10 classes per group (or smaller if not enough classes)
+        actual_group_size = min(group_size, len(unique_labels))
+        num_groups = max(1, len(unique_labels) // actual_group_size)
+        print(f"Time {time.time()}: group_size = {actual_group_size}, num_groups = {num_groups}", file=sys.stderr, flush=True)
+        
+        # Check if gallery is partial (only evaluating subset of available batches)
+        # This is determined by comparing eval_batches to total available
+        total_samples = len(labels_np)
+        samples_per_class = total_samples // len(unique_labels) if len(unique_labels) > 0 else 1
+        gallery_size = total_samples
+        gallery_classes = len(unique_labels)
+        
+        # Check if we're using a partial gallery (typical for max_eval_batches runs)
+        # Full gallery would use all available samples
+        partial_gallery = False
+        if hasattr(self.config.evaluation, 'max_eval_batches') and self.config.evaluation.max_eval_batches:
+            expected_full_samples = gallery_classes * samples_per_class
+            if gallery_size < expected_full_samples:
+                partial_gallery = True
+                print(f"WARNING: Partial gallery detected! {gallery_size} samples vs {expected_full_samples} expected", 
+                      file=sys.stderr, flush=True)
         
         recalls = []
-        print(f"Time {time.time()}: Starting loop over {len(groups)} groups", file=sys.stderr, flush=True)
+        group_info = []
         
-        for group_idx, group in enumerate(groups):
-            print(f"Time {time.time()}: Processing group {group_idx}, size {len(group)}", file=sys.stderr, flush=True)
+        print(f"Time {time.time()}: Starting loop over {num_groups} groups", file=sys.stderr, flush=True)
+        
+        for group_idx in range(num_groups):
+            print(f"Time {time.time()}: Processing group {group_idx}", file=sys.stderr, flush=True)
+            # Get classes for this group
+            class_start = group_idx * actual_group_size
+            class_end = min(class_start + actual_group_size, len(unique_labels))
+            group_classes = unique_labels[class_start:class_end]
+            print(f"Time {time.time()}: Group {group_idx} classes: {len(group_classes)}", file=sys.stderr, flush=True)
+            
             # Filter embeddings and labels for this group
-            mask = np.isin(labels_np, group)
+            mask = np.isin(labels_np, group_classes)
             print(f"Time {time.time()}: mask computed", file=sys.stderr, flush=True)
             group_embeddings = embeddings_np[mask]
             group_labels = labels_np[mask]
             print(f"Time {time.time()}: group embeddings shape {group_embeddings.shape}", file=sys.stderr, flush=True)
             
             if len(group_embeddings) == 0:
+                recalls.append(0.0)
+                group_info.append({
+                    "group_idx": group_idx,
+                    "classes": list(group_classes),
+                    "samples": 0,
+                    "recall": 0.0
+                })
                 continue
             
             print(f"Time {time.time()}: Computing pairwise distances", file=sys.stderr, flush=True)
@@ -99,11 +136,28 @@ class AdvancedMetrics:
                 if group_labels[i] in neighbor_labels:
                     recall_count += 1
                     
-            recalls.append(recall_count / len(group_embeddings))
+            group_recall = recall_count / len(group_embeddings) if len(group_embeddings) > 0 else 0.0
+            recalls.append(group_recall)
             
+            group_info.append({
+                "group_idx": group_idx,
+                "classes": list(group_classes),
+                "samples": len(group_embeddings),
+                "recall": group_recall
+            })
+        
         result = np.mean(recalls) if recalls else 0.0
         print(f"Time {time.time()}: grouped_recall_at_k done: {result}", file=sys.stderr, flush=True)
-        return result
+        
+        return {
+            "score": result,
+            "num_groups": num_groups,
+            "group_size": actual_group_size,
+            "gallery_size": gallery_size,
+            "gallery_classes": gallery_classes,
+            "partial": partial_gallery,
+            "group_info": group_info
+        }
     
     def opis(self, embeddings: torch.Tensor,
              labels: torch.Tensor) -> float:
@@ -193,9 +247,22 @@ class AdvancedMetrics:
         results["silhouette_score"] = silhouette_score(embeddings_np, labels_np)
         
         # Advanced metrics
-        results["grouped_recall_at_k"] = self.grouped_recall_at_k(
-            embeddings, labels, k=self.k
+        grouped_recall_result = self.grouped_recall_at_k(
+            embeddings, labels, k=self.k, group_size=10
         )
+        results["grouped_recall_at_k"] = grouped_recall_result["score"]
+        results["grouped_recall_at_k_num_groups"] = grouped_recall_result.get("num_groups", 0)
+        results["grouped_recall_at_k_group_size"] = grouped_recall_result.get("group_size", 10)
+        results["grouped_recall_at_k_gallery_size"] = grouped_recall_result.get("gallery_size", 0)
+        results["grouped_recall_at_k_gallery_classes"] = grouped_recall_result.get("gallery_classes", 0)
+        results["grouped_recall_at_k_partial"] = grouped_recall_result.get("partial", False)
+        
+        # Add warning for partial gallery
+        if grouped_recall_result.get("partial", False):
+            print(f"WARNING: Grouped Recall computed on partial gallery! "
+                  f"{grouped_recall_result['gallery_size']} samples vs expected full gallery", 
+                  file=sys.stderr, flush=True)
+        
         results["opis"] = self.opis(embeddings, labels)
         
         # Optionally include short aliases for backward compatibility
