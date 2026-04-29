@@ -21,7 +21,7 @@ import torch.nn as nn
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import numpy as np
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -32,10 +32,24 @@ from src.metrics.metrics import AdvancedMetrics
 import timm
 
 
-def get_random_embeddings(dataloaders: dict, device: str, max_eval_batches: int = 100) -> dict:
+def get_random_embeddings(dataloaders: dict, device: str, max_eval_batches: int = 100, db_path: Optional[Path] = None) -> dict:
     """Generate random Gaussian embeddings for baseline"""
     print("Generating random embeddings...")
     random_embeddings = {}
+    conn = None
+    cursor = None
+    if db_path:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS random_embeddings (
+                split_name TEXT,
+                batch_idx INTEGER,
+                embeddings BLOB,
+                labels BLOB,
+                PRIMARY KEY (split_name, batch_idx)
+            )
+        """)
     
     for split_name in ["val_seen_0", "test_seen_0", "test_unseen_0"]:
         dataloader = dataloaders.get(split_name)
@@ -43,7 +57,7 @@ def get_random_embeddings(dataloaders: dict, device: str, max_eval_batches: int 
             random_embeddings[f"{split_name}_embeddings"] = None
             random_embeddings[f"{split_name}_labels"] = None
             continue
-            
+        
         all_embeddings = []
         all_labels = []
         
@@ -56,6 +70,16 @@ def get_random_embeddings(dataloaders: dict, device: str, max_eval_batches: int 
                 random_emb = torch.randn(batch_size, 512)
                 all_embeddings.append(random_emb)
                 all_labels.append(labels)
+                
+                # Store in SQLite if db_path provided
+                if cursor:
+                    embeddings_np = random_emb.cpu().numpy()
+                    labels_np = labels.cpu().numpy()
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO random_embeddings (split_name, batch_idx, embeddings, labels) VALUES (?, ?, ?, ?)",
+                        (split_name, batch_idx, embeddings_np.tobytes(), labels_np.tobytes())
+                    )
+                    conn.commit()
         
         if all_embeddings:
             random_embeddings[f"{split_name}_embeddings"] = torch.cat(all_embeddings)
@@ -68,10 +92,13 @@ def get_random_embeddings(dataloaders: dict, device: str, max_eval_batches: int 
             random_embeddings[f"{split_name}_embeddings"] = None
             random_embeddings[f"{split_name}_labels"] = None
     
+    if conn:
+        conn.close()
+    
     return random_embeddings
 
 
-def get_frozen_resnet_embeddings(dataloaders: dict, device: str, max_eval_batches: int = 100) -> dict:
+def get_frozen_resnet_embeddings(dataloaders: dict, device: str, max_eval_batches: int = 100, db_path: Optional[Path] = None) -> dict:
     """Generate embeddings from frozen ResNet50"""
     print("Loading frozen ResNet50...")
     backbone = Backbone(
@@ -84,6 +111,20 @@ def get_frozen_resnet_embeddings(dataloaders: dict, device: str, max_eval_batche
     backbone.eval()
     
     embeddings_dict = {}
+    conn = None
+    cursor = None
+    if db_path:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS resnet50_embeddings (
+                split_name TEXT,
+                batch_idx INTEGER,
+                embeddings BLOB,
+                labels BLOB,
+                PRIMARY KEY (split_name, batch_idx)
+            )
+        """)
     
     for split_name in ["val_seen_0", "test_seen_0", "test_unseen_0"]:
         dataloader = dataloaders.get(split_name)
@@ -103,6 +144,18 @@ def get_frozen_resnet_embeddings(dataloaders: dict, device: str, max_eval_batche
                 embeddings = backbone(images)
                 all_embeddings.append(embeddings.cpu())
                 all_labels.append(labels)
+                
+                # Store in SQLite if db_path provided
+                if cursor:
+                    emb_cpu = embeddings.cpu()
+                    embeddings_np = emb_cpu.numpy()
+                    labels_np = labels.cpu().numpy()
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO resnet50_embeddings (split_name, batch_idx, embeddings, labels) VALUES (?, ?, ?, ?)",
+                        (split_name, batch_idx, embeddings_np.tobytes(), labels_np.tobytes())
+                    )
+                    conn.commit()
+                
                 # Free GPU memory after each batch
                 del embeddings
                 torch.cuda.empty_cache()
@@ -118,10 +171,13 @@ def get_frozen_resnet_embeddings(dataloaders: dict, device: str, max_eval_batche
             embeddings_dict[f"{split_name}_embeddings"] = None
             embeddings_dict[f"{split_name}_labels"] = None
     
+    if conn:
+        conn.close()
+    
     return embeddings_dict
 
 
-def get_frozen_dino_embeddings(dataloaders: dict, device: str, max_eval_batches: int = 100) -> dict:
+def get_frozen_dino_embeddings(dataloaders: dict, device: str, max_eval_batches: int = 100, db_path: Optional[Path] = None) -> dict:
     """Generate embeddings from frozen DINO ViT"""
     print("Loading frozen DINO ViT...")
     backbone = Backbone(
@@ -134,6 +190,20 @@ def get_frozen_dino_embeddings(dataloaders: dict, device: str, max_eval_batches:
     backbone.eval()
     
     embeddings_dict = {}
+    conn = None
+    cursor = None
+    if db_path:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS dino_embeddings (
+                split_name TEXT,
+                batch_idx INTEGER,
+                embeddings BLOB,
+                labels BLOB,
+                PRIMARY KEY (split_name, batch_idx)
+            )
+        """)
     
     for split_name in ["val_seen_0", "test_seen_0", "test_unseen_0"]:
         dataloader = dataloaders.get(split_name)
@@ -153,6 +223,18 @@ def get_frozen_dino_embeddings(dataloaders: dict, device: str, max_eval_batches:
                 embeddings = backbone(images)
                 all_embeddings.append(embeddings.cpu())
                 all_labels.append(labels)
+                
+                # Store in SQLite if db_path provided
+                if cursor:
+                    emb_cpu = embeddings.cpu()
+                    embeddings_np = emb_cpu.numpy()
+                    labels_np = labels.cpu().numpy()
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO dino_embeddings (split_name, batch_idx, embeddings, labels) VALUES (?, ?, ?, ?)",
+                        (split_name, batch_idx, embeddings_np.tobytes(), labels_np.tobytes())
+                    )
+                    conn.commit()
+                
                 # Free GPU memory after each batch
                 del embeddings
                 torch.cuda.empty_cache()
@@ -168,10 +250,13 @@ def get_frozen_dino_embeddings(dataloaders: dict, device: str, max_eval_batches:
             embeddings_dict[f"{split_name}_embeddings"] = None
             embeddings_dict[f"{split_name}_labels"] = None
     
+    if conn:
+        conn.close()
+    
     return embeddings_dict
 
 
-def get_frozen_clip_embeddings(dataloaders: dict, device: str, max_eval_batches: int = 100) -> dict:
+def get_frozen_clip_embeddings(dataloaders: dict, device: str, max_eval_batches: int = 100, db_path: Optional[Path] = None) -> dict:
     """Generate embeddings from frozen CLIP"""
     print("Loading frozen CLIP...")
     backbone = Backbone(
@@ -184,6 +269,20 @@ def get_frozen_clip_embeddings(dataloaders: dict, device: str, max_eval_batches:
     backbone.eval()
     
     embeddings_dict = {}
+    conn = None
+    cursor = None
+    if db_path:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS clip_embeddings (
+                split_name TEXT,
+                batch_idx INTEGER,
+                embeddings BLOB,
+                labels BLOB,
+                PRIMARY KEY (split_name, batch_idx)
+            )
+        """)
     
     for split_name in ["val_seen_0", "test_seen_0", "test_unseen_0"]:
         dataloader = dataloaders.get(split_name)
@@ -203,6 +302,18 @@ def get_frozen_clip_embeddings(dataloaders: dict, device: str, max_eval_batches:
                 embeddings = backbone(images)
                 all_embeddings.append(embeddings.cpu())
                 all_labels.append(labels)
+                
+                # Store in SQLite if db_path provided
+                if cursor:
+                    emb_cpu = embeddings.cpu()
+                    embeddings_np = emb_cpu.numpy()
+                    labels_np = labels.cpu().numpy()
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO clip_embeddings (split_name, batch_idx, embeddings, labels) VALUES (?, ?, ?, ?)",
+                        (split_name, batch_idx, embeddings_np.tobytes(), labels_np.tobytes())
+                    )
+                    conn.commit()
+                
                 # Free GPU memory after each batch
                 del embeddings
                 torch.cuda.empty_cache()
@@ -217,6 +328,9 @@ def get_frozen_clip_embeddings(dataloaders: dict, device: str, max_eval_batches:
         else:
             embeddings_dict[f"{split_name}_embeddings"] = None
             embeddings_dict[f"{split_name}_labels"] = None
+    
+    if conn:
+        conn.close()
     
     return embeddings_dict
 
@@ -240,7 +354,8 @@ def compute_metrics_for_embeddings(embeddings_dict: dict, config: Config, split_
 
 
 def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Path, 
-                           max_eval_batches: int = 100) -> dict:
+                            max_eval_batches: int = 100, db_type: Literal["sqlite", "postgresql"] = "sqlite",
+                            db_path: Optional[str] = None) -> dict:
     """Run a baseline experiment and return metrics"""
     print(f"\n{'='*60}")
     print(f"Running baseline: {baseline_name}")
@@ -257,8 +372,11 @@ def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Pat
     # Get embeddings
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
+    print(f"Using database: {db_type}")
+    if db_path:
+        print(f"Database path: {db_path}")
     
-    embeddings_dict = embeddings_func(dataloaders, device, max_eval_batches)
+    embeddings_dict = embeddings_func(dataloaders, device, max_eval_batches, db_path=Path(db_path) if db_path else None)
     
     # Compute metrics
     all_metrics = {}
