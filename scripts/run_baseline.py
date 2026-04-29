@@ -395,14 +395,18 @@ def compute_shuffled_label_metrics(original_embeddings_dict: dict, config: Confi
     
     prefixed_metrics = {}
     for key, value in split_metrics.items():
-        prefixed_metrics[f"{split_name}_shuffled_{key}"] = value
+        # Use shuffled_ prefix for shuffled labels metrics
+        if key.startswith("test_unseen_"):
+            prefixed_metrics[f"{key}_shuffled"] = value
+        else:
+            prefixed_metrics[f"{key}_shuffled"] = value
     
     return prefixed_metrics
 
 
 def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Path, 
                             max_eval_batches: int = 100, db_type: Literal["sqlite", "postgresql"] = "sqlite",
-                            db_path: Optional[str] = None) -> dict:
+                            db_path: Optional[str] = None, run_shuffled: bool = False) -> dict:
     """Run a baseline experiment and return metrics"""
     print(f"\n{'='*60}")
     print(f"Running baseline: {baseline_name}")
@@ -464,6 +468,28 @@ def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Pat
     all_metrics["mode"] = "baseline"
     all_metrics["simulated"] = False
     
+    # Run shuffled label baseline if requested
+    if run_shuffled:
+        print(f"\n{'='*60}")
+        print(f"Running shuffled label baseline for comparison")
+        print(f"{'='*60}")
+        
+        shuffled_val_metrics = compute_shuffled_label_metrics(embeddings_dict, config, "val_seen_0")
+        shuffled_test_seen_metrics = compute_shuffled_label_metrics(embeddings_dict, config, "test_seen_0")
+        shuffled_test_unseen_metrics = compute_shuffled_label_metrics(embeddings_dict, config, "test_unseen_0")
+        
+        all_metrics.update(shuffled_val_metrics)
+        all_metrics.update(shuffled_test_seen_metrics)
+        all_metrics.update(shuffled_test_unseen_metrics)
+        
+        # Compute lift over shuffled labels
+        if test_unseen_metrics and shuffled_test_unseen_metrics:
+            shuffled_recall = shuffled_test_unseen_metrics.get("test_unseen_grouped_recall_at_k", 0)
+            real_recall = test_unseen_metrics.get("test_unseen_grouped_recall_at_k", 0)
+            lift_vs_shuffled = real_recall - shuffled_recall
+            all_metrics["test_unseen_grouped_recall_lift_vs_shuffled_labels"] = lift_vs_shuffled
+            print(f"Lift over shuffled labels: {lift_vs_shuffled:.4f}")
+    
     # Save metrics
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = output_dir / f"{baseline_name}_metrics.json"
@@ -516,6 +542,8 @@ def main():
                        help="Output directory for results")
     parser.add_argument("--max-eval-batches", type=int, default=100,
                        help="Maximum evaluation batches")
+    parser.add_argument("--run-shuffled", action="store_true",
+                       help="Also run shuffled label baseline for comparison")
     
     args = parser.parse_args()
     
@@ -523,10 +551,10 @@ def main():
     
     # Map baseline name to function
     baseline_funcs = {
-        "random": lambda: run_baseline_experiment("random", get_random_embeddings, output_dir, args.max_eval_batches),
-        "resnet50": lambda: run_baseline_experiment("frozen_resnet50", get_frozen_resnet_embeddings, output_dir, args.max_eval_batches),
-        "dino": lambda: run_baseline_experiment("frozen_dino", get_frozen_dino_embeddings, output_dir, args.max_eval_batches),
-        "clip": lambda: run_baseline_experiment("frozen_clip", get_frozen_clip_embeddings, output_dir, args.max_eval_batches),
+        "random": lambda: run_baseline_experiment("random", get_random_embeddings, output_dir, args.max_eval_batches, run_shuffled=args.run_shuffled),
+        "resnet50": lambda: run_baseline_experiment("frozen_resnet50", get_frozen_resnet_embeddings, output_dir, args.max_eval_batches, run_shuffled=args.run_shuffled),
+        "dino": lambda: run_baseline_experiment("frozen_dino", get_frozen_dino_embeddings, output_dir, args.max_eval_batches, run_shuffled=args.run_shuffled),
+        "clip": lambda: run_baseline_experiment("frozen_clip", get_frozen_clip_embeddings, output_dir, args.max_eval_batches, run_shuffled=args.run_shuffled),
     }
     
     metrics = baseline_funcs[args.baseline]()
