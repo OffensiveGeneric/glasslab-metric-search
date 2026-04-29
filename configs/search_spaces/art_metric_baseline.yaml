@@ -27,7 +27,7 @@ experiment:
     name: language_alignment
     weight: 0.05
   evaluator:
-    name: art_retrieval_v1
+    name: cifar_contrastive_v1
   trainer:
     batch_size: 64
     learning_rate: 0.0001

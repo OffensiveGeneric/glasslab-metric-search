@@ -1,12 +1,17 @@
-FROM nvidia/cuda:12.4.1-base-ubuntu22.04
+FROM pytorch/pytorch:2.11.0-cuda13.0-cudnn9-runtime
 
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN apt-get update && apt-get install -y python3-pip && rm -rf /var/lib/apt/lists/*
-COPY pyproject.toml README.md /app/
+RUN apt-get update && apt-get install -y curl g++ && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml /app/pyproject.toml
+COPY README.md /app/README.md
+
+RUN pip install --no-cache-dir --break-system-packages .
+
 COPY search /app/search
 COPY src /app/src
 COPY scripts /app/scripts
@@ -15,8 +20,7 @@ COPY configs /app/configs
 COPY docs /app/docs
 COPY program /app/program
 
-RUN pip install --no-cache-dir --break-system-packages torch torchvision faiss-cpu
-RUN pip install --no-cache-dir --break-system-packages .
+ENV PYTHONPATH=/app
 
 CMD ["python3", "scripts/run_experiment.py", "--help"]
 
