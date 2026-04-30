@@ -48,8 +48,8 @@ def validate_cifar100_config(config: dict) -> None:
                 raise ValueError(f"CIFAR-100 contrastive learning requires loss_name from: {allowed}")
             
             backbone_name = config.get("backbone_name", "resnet50")
-            if backbone_name not in ["resnet50", "vit_base_patch16", "convnext_base"]:
-                allowed = ", ".join(["resnet50", "vit_base_patch16", "convnext_base"])
+            if backbone_name not in ["resnet18", "resnet50", "vit_base_patch16", "convnext_base"]:
+                allowed = ", ".join(["resnet18", "resnet50", "vit_base_patch16", "convnext_base"])
                 raise ValueError(f"CIFAR-100 contrastive learning requires backbone_name from: {allowed}")
         else:
             backbone = config.get("backbone", {}).get("name", "")

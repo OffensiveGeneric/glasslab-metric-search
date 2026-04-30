@@ -95,14 +95,277 @@ def evaluate_metrics(
         for images, labels in test_loader:
             images = images.to(device)
             embeddings = model(images)
-            all_embeddings.append(embeddings.cpu())
-            all_labels.append(labels)
+            all_embeddings.append(embeddings.detach().cpu())
+            all_labels.append(labels.detach().cpu())
 
     embeddings = torch.cat(all_embeddings)
     labels = torch.cat(all_labels)
 
     metrics_fn = AdvancedMetrics(config)
     return metrics_fn.compute_all_metrics(embeddings, labels)
+
+
+METRIC_ALIASES = {
+    "ami": "adjusted_mutual_info",
+    "ari": "adjusted_rand_index",
+    "nmi": "normalized_mutual_info",
+    "silhouette": "silhouette_score",
+}
+
+
+SUMMARY_ALIAS_SOURCES = {
+    "grouped_recall_at_k": "test_unseen_grouped_recall_at_k",
+    "opis": "test_unseen_opis",
+    "adjusted_mutual_info": "test_unseen_adjusted_mutual_info",
+    "adjusted_rand_index": "test_unseen_adjusted_rand_index",
+    "normalized_mutual_info": "test_unseen_normalized_mutual_info",
+    "silhouette_score": "test_unseen_silhouette_score",
+    "composite_score": "test_unseen_composite_score",
+}
+
+
+def composite_score(metrics: dict[str, Any]) -> float | None:
+    required = (
+        "grouped_recall_at_k",
+        "opis",
+        "adjusted_mutual_info",
+        "adjusted_rand_index",
+        "normalized_mutual_info",
+        "silhouette_score",
+    )
+    if any(metrics.get(key) is None for key in required):
+        return None
+    return round(
+        (
+            float(metrics.get("grouped_recall_at_k", 0.0))
+            + (1.0 - float(metrics.get("opis", 0.0)))
+            + float(metrics.get("adjusted_mutual_info", 0.0))
+            + float(metrics.get("adjusted_rand_index", 0.0))
+            + float(metrics.get("normalized_mutual_info", 0.0))
+            + float(metrics.get("silhouette_score", 0.0))
+        )
+        / 6.0,
+        4,
+    )
+
+
+def normalize_metric_keys(metrics: dict[str, Any]) -> dict[str, Any]:
+    normalized = {}
+    for key, value in metrics.items():
+        if isinstance(value, bool) or value is None:
+            normalized[METRIC_ALIASES.get(key, key)] = value
+        else:
+            normalized[METRIC_ALIASES.get(key, key)] = float(value)
+    normalized["composite_score"] = composite_score(normalized)
+    return normalized
+
+
+def prefix_metrics(prefix: str, metrics: dict[str, Any]) -> dict[str, Any]:
+    return {f"{prefix}_{key}": value for key, value in metrics.items()}
+
+
+def class_count_metadata(labels: torch.Tensor, prefix: str) -> dict[str, int | float | None]:
+    labels_cpu = labels.detach().cpu()
+    if labels_cpu.numel() == 0:
+        return {
+            f"{prefix}_num_samples": 0,
+            f"{prefix}_num_classes": 0,
+            f"{prefix}_min_samples_per_class": None,
+            f"{prefix}_max_samples_per_class": None,
+            f"{prefix}_mean_samples_per_class": None,
+        }
+
+    _, counts = torch.unique(labels_cpu, return_counts=True)
+    counts_f = counts.to(torch.float32)
+    return {
+        f"{prefix}_num_samples": int(labels_cpu.numel()),
+        f"{prefix}_num_classes": int(counts.numel()),
+        f"{prefix}_min_samples_per_class": int(counts.min().item()),
+        f"{prefix}_max_samples_per_class": int(counts.max().item()),
+        f"{prefix}_mean_samples_per_class": round(float(counts_f.mean().item()), 4),
+    }
+
+
+def gallery_metadata(
+    labels: torch.Tensor,
+    prefix: str,
+    loader: DataLoader | None,
+    max_batches: int | None,
+) -> dict[str, int | bool | None]:
+    labels_cpu = labels.detach().cpu()
+    total_samples = len(loader.dataset) if loader is not None and hasattr(loader, "dataset") else None
+    batch_size = getattr(loader, "batch_size", None)
+    partial = False
+    if max_batches is not None:
+        partial = True
+        if total_samples is not None and batch_size is not None:
+            partial = int(labels_cpu.numel()) < int(total_samples)
+    return {
+        f"{prefix}_gallery_num_samples": int(labels_cpu.numel()),
+        f"{prefix}_gallery_num_classes": int(torch.unique(labels_cpu).numel()) if labels_cpu.numel() else 0,
+        f"{prefix}_gallery_total_dataset_samples": int(total_samples) if total_samples is not None else None,
+        f"{prefix}_gallery_max_eval_batches": int(max_batches) if max_batches is not None else None,
+        f"{prefix}_gallery_partial": partial,
+    }
+
+
+def evaluate_embeddings(
+    embeddings: torch.Tensor,
+    labels: torch.Tensor,
+    config: Config,
+    warnings: list[str],
+    context: str,
+) -> dict[str, Any]:
+    if embeddings.numel() == 0 or labels.numel() == 0:
+        warnings.append(f"{context} has no embeddings or labels; metrics are null")
+        return normalize_metric_keys(
+            {
+                "grouped_recall_at_k": None,
+                "opis": None,
+                "ami": None,
+                "ari": None,
+                "nmi": None,
+                "silhouette": None,
+            }
+        )
+
+    num_classes = int(torch.unique(labels.detach().cpu()).numel())
+    if num_classes < 2:
+        warnings.append(f"{context} has fewer than two classes; metrics are null")
+        return normalize_metric_keys(
+            {
+                "grouped_recall_at_k": None,
+                "opis": None,
+                "ami": None,
+                "ari": None,
+                "nmi": None,
+                "silhouette": None,
+            }
+        )
+
+    try:
+        return normalize_metric_keys(AdvancedMetrics(config).compute_all_metrics(embeddings, labels))
+    except Exception as exc:
+        warnings.append(f"{context} metrics could not be computed: {exc}")
+        return normalize_metric_keys(
+            {
+                "grouped_recall_at_k": None,
+                "opis": None,
+                "ami": None,
+                "ari": None,
+                "nmi": None,
+                "silhouette": None,
+            }
+        )
+
+
+def collect_embeddings(
+    model: nn.Module,
+    loader: DataLoader | None,
+    device: str,
+    max_batches: int | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if loader is None:
+        return torch.empty(0), torch.empty(0, dtype=torch.long)
+
+    model.eval()
+    all_embeddings = []
+    all_labels = []
+    with torch.no_grad():
+        for batch_idx, (images, labels) in enumerate(loader):
+            if max_batches is not None and batch_idx >= max_batches:
+                break
+            images = images.to(device)
+            embeddings = model(images)
+            all_embeddings.append(embeddings.detach().cpu())
+            all_labels.append(labels.detach().cpu())
+
+    if not all_embeddings:
+        return torch.empty(0), torch.empty(0, dtype=torch.long)
+    return torch.cat(all_embeddings), torch.cat(all_labels)
+
+
+def shuffled_label_baseline(
+    embeddings: torch.Tensor,
+    labels: torch.Tensor,
+    config: Config,
+    warnings: list[str],
+    context: str,
+) -> dict[str, Any]:
+    generator = torch.Generator().manual_seed(int(config.data.seed))
+    shuffled = labels[torch.randperm(labels.numel(), generator=generator)]
+    return evaluate_embeddings(embeddings, shuffled, config, warnings, context)
+
+
+def random_embedding_baseline(
+    embeddings: torch.Tensor,
+    labels: torch.Tensor,
+    config: Config,
+    warnings: list[str],
+    context: str,
+) -> dict[str, Any]:
+    generator = torch.Generator().manual_seed(int(config.data.seed) + 17)
+    random_embeddings = torch.randn(
+        embeddings.shape,
+        generator=generator,
+        dtype=embeddings.dtype if embeddings.numel() else torch.float32,
+    )
+    return evaluate_embeddings(random_embeddings, labels, config, warnings, context)
+
+
+def baseline_sane(
+    observed: Any,
+    chance: Any,
+    *,
+    absolute_tolerance: float = 0.10,
+    relative_tolerance: float = 0.50,
+) -> bool:
+    if observed is None or chance is None:
+        return False
+    observed_f = float(observed)
+    chance_f = float(chance)
+    tolerance = max(absolute_tolerance, abs(chance_f) * relative_tolerance)
+    return abs(observed_f - chance_f) <= tolerance
+
+
+def append_runner_log(output_dir: Path, message: str) -> None:
+    log_path = output_dir / "logs" / "runner.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(message + "\n")
+
+
+def equalized_seen_subset(
+    embeddings: torch.Tensor,
+    labels: torch.Tensor,
+    target_num_classes: int,
+    seed: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    unique = torch.unique(labels.detach().cpu()).sort().values
+    if target_num_classes <= 0 or unique.numel() < target_num_classes:
+        return torch.empty(0), torch.empty(0, dtype=torch.long)
+    generator = torch.Generator().manual_seed(int(seed))
+    selected = unique[torch.randperm(unique.numel(), generator=generator)[:target_num_classes]]
+    mask = torch.isin(labels.detach().cpu(), selected)
+    return embeddings[mask], labels[mask]
+
+
+def add_summary_aliases(metrics: dict[str, Any]) -> None:
+    for alias, source in SUMMARY_ALIAS_SOURCES.items():
+        metrics[alias] = metrics.get(source)
+
+
+def apply_run_config_overrides(config: Config, run_config: dict[str, Any], budget: Any) -> None:
+    if "backbone_name" in run_config:
+        config.model.backbones = [run_config["backbone_name"]]
+    if "batch_size" in run_config:
+        config.training.batch_size = int(run_config["batch_size"])
+    if "learning_rate" in run_config:
+        config.training.learning_rate = float(run_config["learning_rate"])
+    if "max_epochs" in run_config:
+        config.training.epochs = int(run_config["max_epochs"])
+    if hasattr(budget, "max_epochs") and budget.max_epochs is not None:
+        config.training.epochs = int(budget.max_epochs)
 
 
 def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
@@ -168,7 +431,6 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
                     config.l2anc = L2ANCConfig(**value)
             elif hasattr(config, key):
                 setattr(config, key, value)
-        
         flat_config_map = {
             "backbone_name": lambda v: setattr(config.model, "backbones", [v] if isinstance(v, str) else v),
             "loss_name": lambda v: None,
@@ -186,6 +448,7 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
         loss_name = run_spec.config.get("loss_name", "contrastive")
         if loss_name != "contrastive":
             raise NotImplementedError(f"Only contrastive loss is supported in real mode, got: {loss_name}")
+    apply_run_config_overrides(config, run_spec.config or {}, run_spec.budget)
 
     dataloaders = get_dataloaders(config)
     train_loader = dataloaders["train_seen_0"]
@@ -224,94 +487,165 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
     embeddings_dir = output_dir / "embeddings"
     embeddings_dir.mkdir(parents=True, exist_ok=True)
     
-    # Collect embeddings once for all splits
-    def collect_embeddings_for_loader(dataloader, name):
-        if dataloader is None:
-            return None, None
-        
-        all_embeddings = []
-        all_labels = []
-        
-        with torch.no_grad():
-            for batch_idx, (images, labels) in enumerate(dataloader):
-                if batch_idx >= max_eval_batches:
-                    break
-                images = images.to(device)
-                embeddings = model(images)
-                all_embeddings.append(embeddings.cpu())
-                all_labels.append(labels)
-        
-        if not all_embeddings:
-            return None, None
-        
-        embeddings = torch.cat(all_embeddings)
-        labels = torch.cat(all_labels)
-        
-        # Save embeddings
-        torch.save(embeddings, embeddings_dir / f"{name}_embeddings.pt")
-        torch.save(labels, embeddings_dir / f"{name}_labels.pt")
-        
-        return embeddings, labels
-    
-    print(f"Time {t.time()}: Collecting embeddings", file=sys.stderr)
-    val_seen_embeddings, val_seen_labels = collect_embeddings_for_loader(dataloaders.get("val_seen_0"), "val_seen")
-    print(f"Time {t.time()}: val_seen embeddings done", file=sys.stderr)
-    test_seen_embeddings, test_seen_labels = collect_embeddings_for_loader(dataloaders.get("test_seen_0"), "test_seen")
-    print(f"Time {t.time()}: test_seen embeddings done", file=sys.stderr)
-    test_unseen_embeddings, test_unseen_labels = collect_embeddings_for_loader(dataloaders.get("test_unseen_0"), "test_unseen")
-    print(f"Time {t.time()}: test_unseen embeddings done", file=sys.stderr)
-    
-    # Compute metrics from collected embeddings
-    def compute_split_metrics_from_embeddings(embeddings, labels, split_name, config):
-        if embeddings is None or labels is None:
-            return {}
-        
-        print(f"Time {t.time()}: Computing metrics for {split_name}", file=sys.stderr)
-        metrics_fn = AdvancedMetrics(config)
-        split_metrics = metrics_fn.compute_all_metrics(embeddings, labels)
-        print(f"Time {t.time()}: Metrics computed for {split_name}: {list(split_metrics.keys())}", file=sys.stderr)
-        
-        prefixed_metrics = {}
-        for key, value in split_metrics.items():
-            prefixed_metrics[f"{split_name}_{key}"] = value
-        
-        return prefixed_metrics
-    
-    val_seen_metrics = compute_split_metrics_from_embeddings(val_seen_embeddings, val_seen_labels, "val_seen", config)
-    test_seen_metrics = compute_split_metrics_from_embeddings(test_seen_embeddings, test_seen_labels, "test_seen", config)
-    test_unseen_metrics = compute_split_metrics_from_embeddings(test_unseen_embeddings, test_unseen_labels, "test_unseen", config)
-    
-    all_metrics = {}
-    all_metrics.update(val_seen_metrics)
-    all_metrics.update(test_seen_metrics)
-    all_metrics.update(test_unseen_metrics)
-    
-    if test_seen_metrics and test_unseen_metrics:
-        generalization_gap_grouped_recall_at_k = test_seen_metrics.get("test_seen_grouped_recall_at_k", 0) - test_unseen_metrics.get("test_unseen_grouped_recall_at_k", 0)
-        all_metrics["generalization_gap_grouped_recall_at_k"] = generalization_gap_grouped_recall_at_k
-    
-    # Add top-level summary aliases for backward compatibility
-    alias_map = {
-        "grouped_recall_at_k": "test_unseen_grouped_recall_at_k",
-        "opis": "test_unseen_opis",
-        "adjusted_mutual_info": "test_unseen_adjusted_mutual_info",
-        "adjusted_rand_index": "test_unseen_adjusted_rand_index",
-        "normalized_mutual_info": "test_unseen_normalized_mutual_info",
-        "silhouette_score": "test_unseen_silhouette_score",
-        "composite_score": "test_unseen_composite_score",
+    model.eval()
+    max_eval_batches = run_spec.budget.max_eval_batches
+    split_loaders = {
+        "val_seen": dataloaders.get("val_seen_0"),
+        "test_seen": dataloaders.get("test_seen_0"),
+        "test_unseen": dataloaders.get("test_unseen_0"),
     }
-    
-    for alias, source_key in alias_map.items():
-        if source_key in all_metrics:
-            all_metrics[alias] = all_metrics[source_key]
+    split_payloads: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+    metrics: dict[str, Any] = {}
+    sanity_warnings: list[str] = []
 
-    metrics = all_metrics
+    for split_name, loader in split_loaders.items():
+        print(f"Time {t.time()}: Collecting embeddings for {split_name}", file=sys.stderr)
+        embeddings, labels = collect_embeddings(model, loader, device, max_eval_batches)
+        print(f"Time {t.time()}: Collected embeddings for {split_name}", file=sys.stderr)
+        split_payloads[split_name] = (embeddings, labels)
+        if embeddings.numel():
+            torch.save(embeddings, embeddings_dir / f"{split_name}_embeddings.pt")
+            torch.save(labels, embeddings_dir / f"{split_name}_labels.pt")
+
+        metrics.update(class_count_metadata(labels, split_name))
+        metrics.update(gallery_metadata(labels, split_name, loader, max_eval_batches))
+        print(f"Time {t.time()}: Computing metrics for {split_name}", file=sys.stderr)
+        split_metrics = evaluate_embeddings(embeddings, labels, config, sanity_warnings, split_name)
+        metrics.update(prefix_metrics(split_name, split_metrics))
+
+        shuffled_metrics = shuffled_label_baseline(
+            embeddings,
+            labels,
+            config,
+            sanity_warnings,
+            f"{split_name} shuffled-label baseline",
+        )
+        metrics.update(prefix_metrics(f"{split_name}_shuffled_label", shuffled_metrics))
+
+        random_metrics = random_embedding_baseline(
+            embeddings,
+            labels,
+            config,
+            sanity_warnings,
+            f"{split_name} random-embedding baseline",
+        )
+        metrics.update(prefix_metrics(f"{split_name}_random_embedding", random_metrics))
+
+        if split_name == "test_unseen":
+            random_recall = random_metrics.get("grouped_recall_at_k")
+            random_chance = random_metrics.get("grouped_recall_chance_at_k")
+            message = (
+                "INFO test_unseen random baseline "
+                f"grouped_recall_at_k={random_recall} chance={random_chance}"
+            )
+            print(message, file=sys.stderr, flush=True)
+            append_runner_log(output_dir, message)
+
+    if metrics.get("test_unseen_grouped_recall_at_k") is None:
+        raise RuntimeError(
+            "grouped_recall_at_k metric is missing. "
+            "The evaluation pipeline did not produce expected metrics. "
+            "Please check the dataset and model configuration."
+        )
+
+    for split_name in ("test_unseen", "test_seen"):
+        real = metrics.get(f"{split_name}_grouped_recall_at_k")
+        shuffled = metrics.get(f"{split_name}_shuffled_label_grouped_recall_at_k")
+        random_metric = metrics.get(f"{split_name}_random_embedding_grouped_recall_at_k")
+        metrics[f"{split_name}_grouped_recall_lift_vs_shuffled_labels"] = (
+            None if real is None or shuffled is None else round(float(real) - float(shuffled), 4)
+        )
+        metrics[f"{split_name}_grouped_recall_lift_vs_random_embeddings"] = (
+            None if real is None or random_metric is None else round(float(real) - float(random_metric), 4)
+        )
+
+    test_seen_embeddings, test_seen_labels = split_payloads["test_seen"]
+    test_unseen_embeddings, test_unseen_labels = split_payloads["test_unseen"]
+    unseen_num_classes = int(metrics.get("test_unseen_num_classes") or 0)
+    equalized_embeddings, equalized_labels = equalized_seen_subset(
+        test_seen_embeddings,
+        test_seen_labels,
+        unseen_num_classes,
+        config.data.seed,
+    )
+    equalized_metadata = class_count_metadata(equalized_labels, "test_seen_equalized")
+    metrics.update(
+        {
+            "test_seen_equalized_num_classes": equalized_metadata["test_seen_equalized_num_classes"],
+            "test_seen_equalized_num_samples": equalized_metadata["test_seen_equalized_num_samples"],
+            "test_unseen_equalized_reference_num_classes": metrics.get("test_unseen_num_classes"),
+            "test_unseen_equalized_reference_grouped_recall_at_k": metrics.get(
+                "test_unseen_grouped_recall_at_k"
+            ),
+        }
+    )
+    equalized_metrics = evaluate_embeddings(
+        equalized_embeddings,
+        equalized_labels,
+        config,
+        sanity_warnings,
+        "test_seen equalized",
+    )
+    metrics["test_seen_equalized_grouped_recall_at_k"] = equalized_metrics.get("grouped_recall_at_k")
+    metrics["test_seen_equalized_composite_score"] = equalized_metrics.get("composite_score")
+    if equalized_embeddings.numel():
+        torch.save(equalized_embeddings, embeddings_dir / "test_seen_equalized_embeddings.pt")
+        torch.save(equalized_labels, embeddings_dir / "test_seen_equalized_labels.pt")
+    else:
+        sanity_warnings.append("test_seen could not be equalized to test_unseen class count")
+    metrics["generalization_gap_equalized_grouped_recall_at_k"] = (
+        None
+        if metrics.get("test_seen_equalized_grouped_recall_at_k") is None
+        or metrics.get("test_unseen_grouped_recall_at_k") is None
+        else round(
+            float(metrics["test_seen_equalized_grouped_recall_at_k"])
+            - float(metrics["test_unseen_grouped_recall_at_k"]),
+            4,
+        )
+    )
+
+    if metrics.get("test_unseen_num_classes") != metrics.get("test_seen_num_classes"):
+        sanity_warnings.append(
+            "test_unseen has fewer classes than test_seen; raw grouped recall is not directly comparable"
+        )
+    if max_eval_batches is not None and max_eval_batches <= 5:
+        sanity_warnings.append("max_eval_batches is small; metrics may be noisy")
+    for split_name in ("test_seen", "test_unseen"):
+        real = metrics.get(f"{split_name}_grouped_recall_at_k")
+        shuffled = metrics.get(f"{split_name}_shuffled_label_grouped_recall_at_k")
+        random_metric = metrics.get(f"{split_name}_random_embedding_grouped_recall_at_k")
+        if real is not None and shuffled is not None and abs(float(real) - float(shuffled)) < 0.05:
+            sanity_warnings.append(
+                f"{split_name} shuffled-label baseline is close to real metric; metric may not reflect learned class structure"
+            )
+        if real is not None and random_metric is not None and abs(float(real) - float(random_metric)) < 0.05:
+            sanity_warnings.append(
+                f"{split_name} random-embedding baseline is close to real metric; model may not be learning useful embeddings"
+            )
+        silhouette = metrics.get(f"{split_name}_silhouette_score")
+        if silhouette is not None and float(silhouette) < 0:
+            sanity_warnings.append(f"{split_name} has negative silhouette score; embedding clusters are not well separated")
+
+    model_quality_interpretable = True
+    for split_name in ("test_seen", "test_unseen"):
+        random_recall = metrics.get(f"{split_name}_random_embedding_grouped_recall_at_k")
+        random_chance = metrics.get(f"{split_name}_random_embedding_grouped_recall_chance_at_k")
+        if not baseline_sane(random_recall, random_chance):
+            model_quality_interpretable = False
+            sanity_warnings.append(
+                f"{split_name} random-embedding grouped recall is not near analytic chance; model quality is not interpretable"
+            )
+
+    metrics["model_quality_interpretable"] = model_quality_interpretable
+
+    add_summary_aliases(metrics)
 
     metrics["run_id"] = run_spec.run_id
     metrics["dataset_id"] = run_spec.dataset.dataset_id
     metrics["mode"] = "real"
     metrics["simulated"] = False
     metrics["warning"] = None
+    metrics["sanity_warnings"] = sorted(set(sanity_warnings))
 
     (output_dir / "metrics.json").write_text(
         json.dumps(metrics, indent=2, sort_keys=True) + "\n",

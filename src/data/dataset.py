@@ -4,6 +4,7 @@ Data module: CIFAR-100 splits with Train-seen, Val-seen, Test-seen, Test-unseen
 
 import torch
 import numpy as np
+import os
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
 from typing import Tuple, List
@@ -154,18 +155,19 @@ class Cifar100Splitter:
             
             # Create dataloaders
             batch_size = self.config.training.batch_size
+            num_workers = int(os.environ.get("GLASSLAB_DATALOADER_NUM_WORKERS", "0"))
             
             dataloaders[f"train_seen_{i}"] = DataLoader(
-                train_seen, batch_size=batch_size, shuffle=True, num_workers=0
+                train_seen, batch_size=batch_size, shuffle=True, num_workers=num_workers
             )
             dataloaders[f"val_seen_{i}"] = DataLoader(
-                val_seen, batch_size=batch_size, shuffle=False, num_workers=0
+                val_seen, batch_size=batch_size, shuffle=False, num_workers=num_workers
             )
             dataloaders[f"test_seen_{i}"] = DataLoader(
-                test_seen, batch_size=batch_size, shuffle=False, num_workers=0
+                test_seen, batch_size=batch_size, shuffle=False, num_workers=num_workers
             )
             dataloaders[f"test_unseen_{i}"] = DataLoader(
-                test_unseen, batch_size=batch_size, shuffle=False, num_workers=0
+                test_unseen, batch_size=batch_size, shuffle=False, num_workers=num_workers
             )
             
             # Store class indices for reference

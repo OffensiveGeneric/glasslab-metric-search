@@ -1,23 +1,116 @@
 from __future__ import annotations
 
-import pytest
 import json
+import os
 import subprocess
 import sys
-import yaml
 from pathlib import Path
 
+import torch
+import yaml
 
-def test_run_experiment_artifacts(tmp_path):
-    """Smoke test: CLI entrypoint produces required artifacts"""
-    config_path = Path("configs/search_spaces/cifar100_contrastive_v0.yaml")
+from src.config import Config
+from src.runners.trainer import (
+    add_summary_aliases,
+    baseline_sane,
+    class_count_metadata,
+    evaluate_embeddings,
+    gallery_metadata,
+    shuffled_label_baseline,
+)
+
+
+def test_class_count_metadata_from_labels() -> None:
+    labels = torch.tensor([1, 1, 1, 2, 2, 3])
+
+    metadata = class_count_metadata(labels, "test_split")
+
+    assert metadata["test_split_num_samples"] == 6
+    assert metadata["test_split_num_classes"] == 3
+    assert metadata["test_split_min_samples_per_class"] == 1
+    assert metadata["test_split_max_samples_per_class"] == 3
+    assert metadata["test_split_mean_samples_per_class"] == 2.0
+
+
+def test_gallery_metadata_marks_partial_eval() -> None:
+    class Loader:
+        batch_size = 4
+        dataset = list(range(20))
+
+    labels = torch.tensor([0, 0, 1, 1, 2, 2, 3, 3])
+
+    metadata = gallery_metadata(labels, "test_split", Loader(), max_batches=2)
+
+    assert metadata["test_split_gallery_num_samples"] == 8
+    assert metadata["test_split_gallery_num_classes"] == 4
+    assert metadata["test_split_gallery_total_dataset_samples"] == 20
+    assert metadata["test_split_gallery_max_eval_batches"] == 2
+    assert metadata["test_split_gallery_partial"] is True
+
+
+def test_baseline_sane_compares_to_analytic_chance() -> None:
+    assert baseline_sane(0.24, 0.20)
+    assert not baseline_sane(0.67, 0.05)
+
+
+def test_shuffled_label_baseline_reduces_cluster_agreement() -> None:
+    config = Config()
+    config.data.seed = 42
+    config.evaluation.k = 5
+    config.evaluation.num_groups = 2
+
+    left = torch.zeros(20, 4)
+    right = torch.ones(20, 4) * 10
+    embeddings = torch.cat([left, right])
+    labels = torch.tensor([0] * 20 + [1] * 20)
+    warnings: list[str] = []
+
+    real = evaluate_embeddings(embeddings, labels, config, warnings, "clustered synthetic")
+    shuffled = shuffled_label_baseline(
+        embeddings,
+        labels,
+        config,
+        warnings,
+        "clustered synthetic shuffled labels",
+    )
+
+    assert real["adjusted_rand_index"] > 0.9
+    assert shuffled["adjusted_rand_index"] < real["adjusted_rand_index"]
+
+
+def test_top_level_aliases_copy_from_test_unseen_metrics() -> None:
+    metrics = {
+        "test_unseen_grouped_recall_at_k": 0.8,
+        "test_unseen_opis": 0.2,
+        "test_unseen_adjusted_mutual_info": 0.3,
+        "test_unseen_adjusted_rand_index": 0.4,
+        "test_unseen_normalized_mutual_info": 0.5,
+        "test_unseen_silhouette_score": -0.1,
+        "test_unseen_composite_score": 0.45,
+    }
+
+    add_summary_aliases(metrics)
+
+    assert metrics["grouped_recall_at_k"] == 0.8
+    assert metrics["opis"] == 0.2
+    assert metrics["adjusted_mutual_info"] == 0.3
+    assert metrics["adjusted_rand_index"] == 0.4
+    assert metrics["normalized_mutual_info"] == 0.5
+    assert metrics["silhouette_score"] == -0.1
+    assert metrics["composite_score"] == 0.45
+
+
+def test_run_experiment_artifacts(tmp_path: Path) -> None:
+    """Smoke test: CLI entrypoint produces required success artifacts."""
+    project_root = Path(__file__).resolve().parents[1]
+    config_path = project_root / "configs" / "search_spaces" / "cifar100_contrastive_v0.yaml"
     output_dir = tmp_path / "test-output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
+    assert yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
     result = subprocess.run(
         [
             sys.executable,
-            "scripts/run_experiment.py",
+            str(project_root / "scripts" / "run_experiment.py"),
             "--config",
             str(config_path),
             "--output-dir",
@@ -33,93 +126,71 @@ def test_run_experiment_artifacts(tmp_path):
             "--loss",
             "contrastive",
         ],
+        cwd=str(project_root),
         capture_output=True,
         text=True,
     )
-    
+
     assert result.returncode == 0, f"CLI failed: {result.stderr}"
-    
-    assert (output_dir / "status.json").exists()
-    status_json = json.loads((output_dir / "status.json").read_text())
-    assert status_json["status"] == "succeeded"
-    
-    assert (output_dir / "metrics.json").exists()
-    metrics_json = json.loads((output_dir / "metrics.json").read_text())
-    assert metrics_json["run_id"] == status_json["run_id"]
-    # Check split-prefixed metrics
-    assert "test_unseen_grouped_recall_at_k" in metrics_json
-    assert "test_unseen_opis" in metrics_json
-    assert "test_unseen_adjusted_mutual_info" in metrics_json
-    assert "test_unseen_adjusted_rand_index" in metrics_json
-    assert "test_unseen_normalized_mutual_info" in metrics_json
-    assert "test_unseen_silhouette_score" in metrics_json
-    # Check top-level aliases
-    assert "grouped_recall_at_k" in metrics_json
-    assert "opis" in metrics_json
-    assert "adjusted_mutual_info" in metrics_json
-    assert "adjusted_rand_index" in metrics_json
-    assert "normalized_mutual_info" in metrics_json
-    assert "silhouette_score" in metrics_json
-    assert "generalization_gap_grouped_recall_at_k" in metrics_json
+
+    status = json.loads((output_dir / "status.json").read_text(encoding="utf-8"))
+    metrics = json.loads((output_dir / "metrics.json").read_text(encoding="utf-8"))
+    assert status["status"] == "succeeded"
+    assert metrics["run_id"] == status["run_id"]
+    assert metrics["dataset_id"] == "cifar100-unseen-classes"
+    assert metrics["simulated"] is False
+    assert "test_unseen_grouped_recall_at_k" in metrics
+    assert "test_unseen_gallery_num_samples" in metrics
+    assert "test_unseen_gallery_partial" in metrics
+    assert "test_unseen_random_embedding_grouped_recall_chance_at_k" in metrics
+    assert "test_unseen_grouped_recall_lift_vs_random_embeddings" in metrics
+    assert "model_quality_interpretable" in metrics
+    assert "test_seen_equalized_grouped_recall_at_k" in metrics
+    assert "generalization_gap_equalized_grouped_recall_at_k" in metrics
+    assert (output_dir / "artifacts_index.json").exists()
+    assert (output_dir / "logs" / "runner.log").exists()
 
 
-def test_run_experiment_failure_bundle(tmp_path):
-    """Test that a failing CLI run produces failure bundle via invalid config"""
-    config_path = tmp_path / "bad-config.yaml"
-    # Create a config that will fail during validation
-    config = {
-        "workflow_family": "contrastive",
-        "search_space_id": "cifar100_contrastive_v0",
-        "dataset": {
-            "dataset_id": "cifar100",
-            "split_version": "v1",
-            "train_uri": "s3://dummy/train",
-            "val_uri": "s3://dummy/val",
-            "test_uri": "s3://dummy/test",
-        },
-        "resources": {"gpu_count": 1, "cpu_count": 4, "memory_gb": 32},
-        "budget": {"max_epochs": 2, "max_wallclock_minutes": 60},
-        "experiment": {
-            "backbone_name": "resnet18",
-            "loss_name": "contrastive",
-        },
-    }
-    config_path.write_text(yaml.dump(config))
-    
-    output_dir = tmp_path / "test-output-failure"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Use environment variable to force trainer failure
-    import os
-    os.environ["GLASSLAB_FORCE_TRAINER_FAILURE"] = "1"
-    
-    try:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "scripts/run_experiment.py",
-                "--config",
-                str(config_path),
-                "--output-dir",
-                str(output_dir),
-                "--epochs",
-                "1",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        
-        assert result.returncode != 0
-        
-        assert (output_dir / "status.json").exists()
-        status_json = json.loads((output_dir / "status.json").read_text())
-        assert status_json["status"] == "failed"
-        
-        assert (output_dir / "error.json").exists()
-        error_json = json.loads((output_dir / "error.json").read_text())
-        assert error_json["exception_type"] == "RuntimeError"
-        assert "GLASSLAB_FORCE_TRAINER_FAILURE" in error_json["message"]
-        
-        assert (output_dir / "logs" / "runner.log").exists()
-    finally:
-        del os.environ["GLASSLAB_FORCE_TRAINER_FAILURE"]
+def test_failure_bundle_forced_trainer_failure(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    output_dir = tmp_path / "forced-failure"
+    config_path = project_root / "configs" / "search_spaces" / "cifar100_contrastive_v0.yaml"
+    assert yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    env = os.environ.copy()
+    env["GLASSLAB_FORCE_TRAINER_FAILURE"] = "1"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(project_root / "scripts" / "run_experiment.py"),
+            "--config",
+            str(config_path),
+            "--output-dir",
+            str(output_dir),
+            "--epochs",
+            "1",
+            "--max-train-batches",
+            "1",
+            "--max-eval-batches",
+            "1",
+            "--backbone",
+            "resnet18",
+            "--loss",
+            "contrastive",
+        ],
+        cwd=str(project_root),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    status = json.loads((output_dir / "status.json").read_text(encoding="utf-8"))
+    error = json.loads((output_dir / "error.json").read_text(encoding="utf-8"))
+    assert status["status"] == "failed"
+    assert error["error_type"] == "RuntimeError"
+    assert error["exception_type"] == "RuntimeError"
+    assert "GLASSLAB_FORCE_TRAINER_FAILURE" in error["message"]
+    assert (output_dir / "report.md").exists()
+    assert (output_dir / "artifacts_index.json").exists()
+    assert (output_dir / "logs" / "runner.log").exists()
