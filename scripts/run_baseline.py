@@ -490,6 +490,23 @@ def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Pat
             all_metrics["test_unseen_grouped_recall_lift_vs_shuffled_labels"] = lift_vs_shuffled
             print(f"Lift over shuffled labels: {lift_vs_shuffled:.4f}")
     
+    # Convert numpy types to Python native types for JSON serialization
+    def convert_to_native(obj):
+        """Convert numpy types to Python native types for JSON serialization"""
+        if isinstance(obj, dict):
+            return {k: convert_to_native(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_to_native(v) for v in obj]
+        elif hasattr(obj, 'item'):  # numpy scalar
+            return obj.item()
+        elif isinstance(obj, (np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, (np.int32, np.int64)):
+            return int(obj)
+        return obj
+    
+    all_metrics = convert_to_native(all_metrics)
+    
     # Save metrics
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = output_dir / f"{baseline_name}_metrics.json"
