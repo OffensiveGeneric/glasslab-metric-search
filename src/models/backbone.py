@@ -74,6 +74,8 @@ class Backbone(nn.Module):
             features = self.backbone(x)
             if isinstance(features, tuple):
                 features = features[0]
+            if hasattr(features, 'pooler_output'):
+                features = features.pooler_output
             embeddings = self.projector(features)
             return embeddings
         
@@ -83,6 +85,8 @@ class Backbone(nn.Module):
             features = self.backbone(x)
             if isinstance(features, tuple):
                 features = features[0]
+            if hasattr(features, 'pooler_output'):
+                features = features.pooler_output
             return features
 
 
