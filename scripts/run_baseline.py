@@ -12,6 +12,11 @@ import sys
 import sqlite3
 from pathlib import Path
 
+# Log image commit if available
+image_commit = os.environ.get("GLASSLAB_IMAGE_COMMIT", "").strip()
+if image_commit:
+    print(f"Image commit: {image_commit}")
+
 # Fix FAISS OpenMP deadlock on macOS
 if os.uname().sysname == "Darwin":
     os.environ.setdefault("MKL_DEBUG_CPU_TYPE", "5")
