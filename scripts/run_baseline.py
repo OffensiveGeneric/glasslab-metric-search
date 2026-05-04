@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import sys
+import sqlite3
 from pathlib import Path
 
 # Fix FAISS OpenMP deadlock on macOS
@@ -335,29 +336,6 @@ def get_frozen_clip_embeddings(dataloaders: dict, device: str, max_eval_batches:
     return embeddings_dict
 
 
-def get_shuffled_label_embeddings(original_embeddings_dict: dict, config: Config, split_name: str) -> dict:
-    """Generate embeddings with shuffled labels for baseline comparison"""
-    print(f"Generating shuffled label baseline for {split_name}...")
-    shuffled_dict = {}
-    
-    # Use the original embeddings but shuffle labels
-    embeddings = original_embeddings_dict.get(f"{split_name}_embeddings")
-    labels = original_embeddings_dict.get(f"{split_name}_labels")
-    
-    if embeddings is None or labels is None:
-        shuffled_dict[f"{split_name}_embeddings"] = None
-        shuffled_dict[f"{split_name}_labels"] = None
-        return shuffled_dict
-    
-    # Shuffle labels while keeping embeddings
-    labels_np = labels.cpu().numpy()
-    rng = np.random.default_rng(config.data.seed + 1000)  # Different seed for shuffling
-    shuffled_labels = rng.permutation(labels_np)
-    
-    shuffled_dict[f"{split_name}_embeddings"] = embeddings
-    shuffled_dict[f"{split_name}_labels"] = torch.tensor(shuffled_labels, dtype=labels.dtype)
-    
-    return shuffled_dict
 
 
 def compute_metrics_for_embeddings(embeddings_dict: dict, config: Config, split_name: str) -> dict:
@@ -371,37 +349,32 @@ def compute_metrics_for_embeddings(embeddings_dict: dict, config: Config, split_
     metrics_fn = AdvancedMetrics(config)
     split_metrics = metrics_fn.compute_all_metrics(embeddings, labels)
     
+    # Compute random embedding baseline
+    generator = torch.Generator().manual_seed(int(config.data.seed) + 17)
+    random_embeddings = torch.randn(
+        embeddings.shape,
+        generator=generator,
+        dtype=embeddings.dtype,
+    )
+    random_metrics = metrics_fn.compute_all_metrics(random_embeddings, labels)
+    
     prefixed_metrics = {}
     for key, value in split_metrics.items():
         prefixed_metrics[f"{split_name}_{key}"] = value
     
+    for key, value in random_metrics.items():
+        prefixed_metrics[f"{split_name}_random_embedding_{key}"] = value
+    
+    # Compute lift metrics for random embeddings
+    real_recall = prefixed_metrics.get(f"{split_name}_grouped_recall_at_k")
+    random_recall = prefixed_metrics.get(f"{split_name}_random_embedding_grouped_recall_at_k")
+    
+    if real_recall is not None and random_recall is not None:
+        prefixed_metrics[f"{split_name}_grouped_recall_lift_vs_random_embeddings"] = real_recall - random_recall
+    
     return prefixed_metrics
 
 
-def compute_shuffled_label_metrics(original_embeddings_dict: dict, config: Config, split_name: str) -> dict:
-    """Compute metrics for shuffled label baseline"""
-    # Get shuffled label embeddings
-    shuffled_dict = get_shuffled_label_embeddings(original_embeddings_dict, config, split_name)
-    
-    # Compute metrics
-    embeddings = shuffled_dict.get(f"{split_name}_embeddings")
-    labels = shuffled_dict.get(f"{split_name}_labels")
-    
-    if embeddings is None or labels is None:
-        return {}
-    
-    metrics_fn = AdvancedMetrics(config)
-    split_metrics = metrics_fn.compute_all_metrics(embeddings, labels)
-    
-    prefixed_metrics = {}
-    for key, value in split_metrics.items():
-        # Use shuffled_ prefix for shuffled labels metrics
-        if key.startswith("test_unseen_"):
-            prefixed_metrics[f"{key}_shuffled"] = value
-        else:
-            prefixed_metrics[f"{key}_shuffled"] = value
-    
-    return prefixed_metrics
 
 
 def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Path, 
@@ -440,55 +413,50 @@ def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Pat
     all_metrics.update(test_seen_metrics)
     all_metrics.update(test_unseen_metrics)
     
-    # Compute shuffled label baseline
-    print(f"\n{'='*60}")
-    print(f"Running shuffled label baseline for comparison")
-    print(f"{'='*60}")
-    
-    shuffled_val_metrics = compute_shuffled_label_metrics(embeddings_dict, config, "val_seen_0")
-    shuffled_test_seen_metrics = compute_shuffled_label_metrics(embeddings_dict, config, "test_seen_0")
-    shuffled_test_unseen_metrics = compute_shuffled_label_metrics(embeddings_dict, config, "test_unseen_0")
-    
-    # Compute lift over shuffled labels
-    if test_unseen_metrics and shuffled_test_unseen_metrics:
-        shuffled_recall = shuffled_test_unseen_metrics.get("test_unseen_grouped_recall_at_k", 0)
-        real_recall = test_unseen_metrics.get("test_unseen_grouped_recall_at_k", 0)
-        lift_vs_shuffled = real_recall - shuffled_recall
-        all_metrics["test_unseen_grouped_recall_lift_vs_shuffled_labels"] = lift_vs_shuffled
-        print(f"Lift over shuffled labels: {lift_vs_shuffled:.4f}")
-    
-    # Compute generalization gap
-    if test_seen_metrics and test_unseen_metrics:
-        generalization_gap = test_seen_metrics.get("test_seen_grouped_recall_at_k", 0) - \
-                            test_unseen_metrics.get("test_unseen_grouped_recall_at_k", 0)
-        all_metrics["generalization_gap_grouped_recall_at_k"] = generalization_gap
-    
-    # Add baseline identifier
-    all_metrics["baseline"] = baseline_name
-    all_metrics["mode"] = "baseline"
-    all_metrics["simulated"] = False
-    
-    # Run shuffled label baseline if requested
+    # Add shuffled label baseline if requested
     if run_shuffled:
         print(f"\n{'='*60}")
         print(f"Running shuffled label baseline for comparison")
         print(f"{'='*60}")
         
-        shuffled_val_metrics = compute_shuffled_label_metrics(embeddings_dict, config, "val_seen_0")
-        shuffled_test_seen_metrics = compute_shuffled_label_metrics(embeddings_dict, config, "test_seen_0")
-        shuffled_test_unseen_metrics = compute_shuffled_label_metrics(embeddings_dict, config, "test_unseen_0")
+        # Shuffle labels for each split
+        def shuffle_labels(labels, seed_offset=0):
+            generator = torch.Generator().manual_seed(int(config.data.seed) + seed_offset)
+            shuffled = labels[torch.randperm(labels.numel(), generator=generator)]
+            return shuffled
         
-        all_metrics.update(shuffled_val_metrics)
-        all_metrics.update(shuffled_test_seen_metrics)
-        all_metrics.update(shuffled_test_unseen_metrics)
+        shuffled_val_labels = shuffle_labels(embeddings_dict["val_seen_0_labels"] if embeddings_dict.get("val_seen_0_labels") is not None else torch.empty(0), seed_offset=1000)
+        shuffled_test_seen_labels = shuffle_labels(embeddings_dict["test_seen_0_labels"] if embeddings_dict.get("test_seen_0_labels") is not None else torch.empty(0), seed_offset=1001)
+        shuffled_test_unseen_labels = shuffle_labels(embeddings_dict["test_unseen_0_labels"] if embeddings_dict.get("test_unseen_0_labels") is not None else torch.empty(0), seed_offset=1002)
         
-        # Compute lift over shuffled labels
-        if test_unseen_metrics and shuffled_test_unseen_metrics:
-            shuffled_recall = shuffled_test_unseen_metrics.get("test_unseen_grouped_recall_at_k", 0)
-            real_recall = test_unseen_metrics.get("test_unseen_grouped_recall_at_k", 0)
-            lift_vs_shuffled = real_recall - shuffled_recall
-            all_metrics["test_unseen_grouped_recall_lift_vs_shuffled_labels"] = lift_vs_shuffled
-            print(f"Lift over shuffled labels: {lift_vs_shuffled:.4f}")
+        shuffled_val_embeddings = embeddings_dict.get("val_seen_0_embeddings")
+        shuffled_test_seen_embeddings = embeddings_dict.get("test_seen_0_embeddings")
+        shuffled_test_unseen_embeddings = embeddings_dict.get("test_unseen_0_embeddings")
+        
+        if shuffled_val_embeddings is not None:
+            shuffled_val_metrics = compute_metrics_for_embeddings({"val_seen_0_embeddings": shuffled_val_embeddings, "val_seen_0_labels": shuffled_val_labels}, config, "val_seen_0")
+            all_metrics.update(shuffled_val_metrics)
+        
+        if shuffled_test_seen_embeddings is not None:
+            shuffled_test_seen_metrics = compute_metrics_for_embeddings({"test_seen_0_embeddings": shuffled_test_seen_embeddings, "test_seen_0_labels": shuffled_test_seen_labels}, config, "test_seen_0")
+            all_metrics.update(shuffled_test_seen_metrics)
+        
+        if shuffled_test_unseen_embeddings is not None:
+            shuffled_test_unseen_metrics = compute_metrics_for_embeddings({"test_unseen_0_embeddings": shuffled_test_unseen_embeddings, "test_unseen_0_labels": shuffled_test_unseen_labels}, config, "test_unseen_0")
+            all_metrics.update(shuffled_test_unseen_metrics)
+            
+            # Compute lift over shuffled labels
+            if test_unseen_metrics and shuffled_test_unseen_metrics:
+                shuffled_recall = shuffled_test_unseen_metrics.get("test_unseen_grouped_recall_at_k", 0)
+                real_recall = test_unseen_metrics.get("test_unseen_grouped_recall_at_k", 0)
+                lift_vs_shuffled = real_recall - shuffled_recall
+                all_metrics["test_unseen_grouped_recall_lift_vs_shuffled_labels"] = lift_vs_shuffled
+                print(f"Lift over shuffled labels: {lift_vs_shuffled:.4f}")
+    
+    # Add baseline identifier
+    all_metrics["baseline"] = baseline_name
+    all_metrics["mode"] = "baseline"
+    all_metrics["simulated"] = False
     
     # Convert numpy types to Python native types for JSON serialization
     def convert_to_native(obj):
@@ -522,6 +490,9 @@ def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Pat
     shuffled_test_unseen_recall = all_metrics.get("test_unseen_shuffled_grouped_recall_at_k", "N/A")
     lift_vs_shuffled = all_metrics.get("test_unseen_grouped_recall_lift_vs_shuffled_labels", "N/A")
     
+    random_test_unseen_recall = all_metrics.get("test_unseen_random_embedding_grouped_recall_at_k", "N/A")
+    lift_vs_random = all_metrics.get("test_unseen_grouped_recall_lift_vs_random_embeddings", "N/A")
+    
     report_content = (
         f"# Baseline Experiment Report: {baseline_name}\n\n"
         f"- baseline: `{baseline_name}`\n"
@@ -534,6 +505,9 @@ def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Pat
         f"\n## Shuffled Label Baseline Comparison\n\n"
         f"- test_unseen_shuffled_grouped_recall_at_k: `{shuffled_test_unseen_recall}`\n"
         f"- test_unseen_grouped_recall_lift_vs_shuffled_labels: `{lift_vs_shuffled}`\n"
+        f"\n## Random Embedding Baseline Comparison\n\n"
+        f"- test_unseen_random_embedding_grouped_recall_at_k: `{random_test_unseen_recall}`\n"
+        f"- test_unseen_grouped_recall_lift_vs_random_embeddings: `{lift_vs_random}`\n"
         f"\n## Gallery Information\n\n"
         f"- test_unseen_grouped_recall_at_k_gallery_size: `{all_metrics.get('test_unseen_grouped_recall_at_k_gallery_size', 'N/A')}`\n"
         f"- test_unseen_grouped_recall_at_k_gallery_classes: `{all_metrics.get('test_unseen_grouped_recall_at_k_gallery_classes', 'N/A')}`\n"

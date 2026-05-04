@@ -12,6 +12,27 @@ from src.config import Config
 import random
 
 
+def find_cifar100_data_root() -> str:
+    """Find CIFAR-100 data root, checking common mount points first"""
+    # Check NFS mount
+    nfs_root = "/mnt/datasets/cifar100"
+    cifar_nfs = os.path.join(nfs_root, "cifar-100-python")
+    if os.path.exists(cifar_nfs) and os.path.isdir(cifar_nfs):
+        print(f"Found pre-downloaded CIFAR-100 at {cifar_nfs}")
+        return nfs_root
+    
+    # Check /data directory
+    data_root = "/data"
+    cifar_data = os.path.join(data_root, "cifar-100-python")
+    if os.path.exists(cifar_data) and os.path.isdir(cifar_data):
+        print(f"Found pre-downloaded CIFAR-100 at {cifar_data}")
+        return data_root
+    
+    # Default location
+    print("CIFAR-100 not found, will download to ./data")
+    return "./data"
+
+
 class Cifar100Splitter:
     """Split CIFAR-100 into disjoint seen/unseen sets with Train/Val/Test partitions"""
     
@@ -124,15 +145,16 @@ class Cifar100Splitter:
         ])
         
         # Load full datasets
+        data_root = find_cifar100_data_root()
         full_train = datasets.CIFAR100(
-            root=f"{self.config.project_dir}/data",
+            root=data_root,
             train=True,
             download=True,
             transform=transform_train
         )
         
         full_test = datasets.CIFAR100(
-            root=f"{self.config.project_dir}/data",
+            root=data_root,
             train=False,
             download=True,
             transform=transform_test

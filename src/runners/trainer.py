@@ -310,7 +310,33 @@ def random_embedding_baseline(
         generator=generator,
         dtype=embeddings.dtype if embeddings.numel() else torch.float32,
     )
-    return evaluate_embeddings(random_embeddings, labels, config, warnings, context)
+    metrics = evaluate_embeddings(random_embeddings, labels, config, warnings, context)
+    random_global_recall = metrics.get("global_recall_at_1")
+    random_global_chance_exact = metrics.get("global_recall_at_1_chance_exact")
+    random_global_chance_approx = metrics.get("global_recall_at_1_chance_approx")
+    random_grouped_recall = metrics.get("grouped_recall_at_k")
+    random_grouped_chance = metrics.get("grouped_recall_chance_at_k")
+    
+    metrics["global_recall_at_1_expected_target"] = random_global_chance_exact
+    metrics["global_recall_at_1_abs_error"] = (
+        None
+        if random_global_recall is None or random_global_chance_exact is None
+        else round(float(abs(random_global_recall - random_global_chance_exact)), 4)
+    )
+    metrics["global_recall_at_1_sanity_pass"] = (
+        False
+        if metrics["global_recall_at_1_abs_error"] is None
+        else metrics["global_recall_at_1_abs_error"] <= 0.03
+    )
+    metrics["grouped_recall_at_k_expected_target"] = random_grouped_chance
+    metrics["grouped_recall_at_k_abs_error"] = (
+        None
+        if random_grouped_recall is None or random_grouped_chance is None
+        else round(float(abs(random_grouped_recall - random_grouped_chance)), 4)
+    )
+    metrics["global_recall_at_1_sanity_target_approx"] = random_global_chance_approx
+    metrics["global_recall_at_1_chance_approx"] = random_global_chance_approx
+    return metrics
 
 
 def baseline_sane(
@@ -635,6 +661,16 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
             sanity_warnings.append(
                 f"{split_name} random-embedding grouped recall is not near analytic chance; model quality is not interpretable"
             )
+
+        random_global_recall = metrics.get(f"{split_name}_random_embedding_global_recall_at_1")
+        random_global_chance = metrics.get(f"{split_name}_random_embedding_global_recall_at_1_chance_exact")
+        if random_global_recall is not None and random_global_chance is not None:
+            random_global_abs_error = abs(float(random_global_recall) - float(random_global_chance))
+            if random_global_abs_error > 0.03:
+                sanity_warnings.append(
+                    f"{split_name} random-embedding global Recall@1 ({random_global_recall:.4f}) "
+                    f"not near exact chance ({random_global_chance:.4f}); error={random_global_abs_error:.4f}"
+                )
 
     metrics["model_quality_interpretable"] = model_quality_interpretable
 

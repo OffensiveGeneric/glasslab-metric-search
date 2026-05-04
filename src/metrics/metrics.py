@@ -42,6 +42,77 @@ class AdvancedMetrics:
         return embeddings_np, labels_np
 
     @staticmethod
+    def _global_recall_at_k_details(
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
+        k: int = 1,
+    ) -> Dict[str, float | bool]:
+        """Global Recall@K using FAISS IndexFlatL2 on full split as gallery."""
+        if len(embeddings) == 0:
+            return {
+                "global_recall_at_k": 0.0,
+                "global_recall_k": float(k),
+                "global_recall_num_samples": 0,
+                "global_recall_num_classes": 0,
+                "global_recall_samples_per_class_mean": 0.0,
+                "global_recall_chance_at_k_exact": 0.0,
+                "global_recall_chance_at_k_approx": 0.0,
+            }
+
+        embeddings_np, labels_np = AdvancedMetrics._as_numpy(embeddings, labels)
+        unique_labels = np.unique(labels_np)
+        num_classes = len(unique_labels)
+        total_samples = len(labels_np)
+        samples_per_class_mean = float(total_samples / num_classes) if num_classes > 0 else 0.0
+
+        if num_classes < 2 or k <= 0:
+            return {
+                "global_recall_at_k": 0.0,
+                "global_recall_k": float(k),
+                "global_recall_num_samples": int(total_samples),
+                "global_recall_num_classes": int(num_classes),
+                "global_recall_samples_per_class_mean": samples_per_class_mean,
+                "global_recall_chance_at_k_exact": 0.0,
+                "global_recall_chance_at_k_approx": 0.0,
+            }
+
+        if import_platform_faiss is not None:
+            index = import_platform_faiss.IndexFlatL2(embeddings_np.shape[1])
+            index.add(embeddings_np)
+            distances, indices = index.search(embeddings_np, min(k + 1, total_samples))
+        else:
+            n = total_samples
+            distances = np.zeros((n, n), dtype=np.float32)
+            for i in range(n):
+                diff = embeddings_np - embeddings_np[i]
+                distances[i] = np.sqrt(np.sum(diff ** 2, axis=1))
+            indices = np.argsort(distances, axis=1)
+
+        recall_count = 0
+        for row_idx in range(total_samples):
+            neighbor_indices = indices[row_idx]
+            nearest = [idx for idx in neighbor_indices if idx != row_idx][:k]
+            if len(nearest) == 0:
+                continue
+            neighbor_labels = labels_np[nearest]
+            if labels_np[row_idx] in neighbor_labels:
+                recall_count += 1
+
+        global_recall = float(recall_count / total_samples) if total_samples > 0 else 0.0
+        chance_exact = AdvancedMetrics._chance_at_k_for_labels(labels_np, k)
+        chance_approx = 1.0 - ((num_classes - 1) / num_classes) ** k if num_classes > 0 else 0.0
+
+        return {
+            "global_recall_at_k": global_recall,
+            "global_recall_k": float(k),
+            "global_recall_num_samples": int(total_samples),
+            "global_recall_num_classes": int(num_classes),
+            "global_recall_samples_per_class_mean": samples_per_class_mean,
+            "global_recall_chance_at_k_exact": chance_exact,
+            "global_recall_chance_at_k_approx": chance_approx,
+        }
+
+    @staticmethod
     def _chance_at_k_for_labels(labels: np.ndarray, k: int) -> float:
         """Exact chance of at least one same-label neighbor under random ranking."""
         if labels.size <= 1 or k <= 0:
@@ -114,7 +185,73 @@ class AdvancedMetrics:
             }
 
         if import_platform_faiss is None:
-            raise RuntimeError("FAISS is required for grouped_recall_at_k on this platform")
+            # Fallback: manual distance computation for macOS
+            embeddings_np, labels_np = self._as_numpy(embeddings, labels)
+            unique_labels = np.unique(labels_np)
+            groups = self._class_groups(labels_np, group_size)
+            recalls = []
+            chance_estimates = []
+            group_class_counts = []
+            group_sample_counts = []
+
+            for group in groups:
+                mask = np.isin(labels_np, group)
+                group_embeddings = embeddings_np[mask]
+                group_labels = labels_np[mask]
+                if len(group_embeddings) <= 1:
+                    continue
+
+                # Compute pairwise distances manually
+                n = len(group_embeddings)
+                distances = np.zeros((n, n))
+                for i in range(n):
+                    diff = group_embeddings - group_embeddings[i]
+                    distances[i] = np.sqrt(np.sum(diff ** 2, axis=1))
+
+                # Replace diagonal with infinity (ignore self)
+                np.fill_diagonal(distances, np.inf)
+
+                search_k = min(k + 1, n)
+                # Get k nearest neighbors (excluding self)
+                neighbor_indices = np.argsort(distances, axis=1)[:, :search_k]
+
+                recall_count = 0
+                for row_idx in range(n):
+                    nearest = [idx for idx in neighbor_indices[row_idx] if idx != row_idx][:k]
+                    if len(nearest) == 0:
+                        continue
+                    neighbor_labels = group_labels[nearest]
+                    if group_labels[row_idx] in neighbor_labels:
+                        recall_count += 1
+
+                recalls.append(recall_count / n)
+                chance_estimates.append(self._chance_at_k_for_labels(group_labels, k))
+                group_class_counts.append(len(np.unique(group_labels)))
+                group_sample_counts.append(n)
+
+            result = float(np.mean(recalls)) if recalls else 0.0
+            chance = float(np.mean(chance_estimates)) if chance_estimates else 0.0
+            mean_group_classes = float(np.mean(group_class_counts)) if group_class_counts else 0.0
+            class_count_chance = self.recall_chance_estimate(k, int(round(mean_group_classes)))
+            effective_group_size = min(group_size, len(unique_labels)) if len(unique_labels) else group_size
+
+            details = {
+                "grouped_recall_at_k": result,
+                "grouped_recall_chance_at_k": chance,
+                "grouped_recall_class_count_chance_at_k": class_count_chance,
+                "grouped_recall_k": float(k),
+                "grouped_recall_num_groups": float(len(recalls)),
+                "grouped_recall_mean_group_num_classes": mean_group_classes,
+                "grouped_recall_min_group_num_classes": float(np.min(group_class_counts)) if group_class_counts else 0.0,
+                "grouped_recall_max_group_num_classes": float(np.max(group_class_counts)) if group_class_counts else 0.0,
+                "grouped_recall_mean_group_num_samples": float(np.mean(group_sample_counts)) if group_sample_counts else 0.0,
+                "grouped_recall_at_k_num_groups": float(len(recalls)),
+                "grouped_recall_at_k_group_size": float(effective_group_size),
+                "grouped_recall_at_k_gallery_size": float(len(labels_np)),
+                "grouped_recall_at_k_gallery_classes": float(len(unique_labels)),
+                "grouped_recall_at_k_partial": False,
+            }
+            return details
 
         embeddings_np, labels_np = self._as_numpy(embeddings, labels)
         unique_labels = np.unique(labels_np)
@@ -172,11 +309,6 @@ class AdvancedMetrics:
             "grouped_recall_at_k_gallery_classes": float(len(unique_labels)),
             "grouped_recall_at_k_partial": False,
         }
-        print(
-            f"Time {time.time()}: grouped_recall_at_k done: {result}, chance={chance}",
-            file=sys.stderr,
-            flush=True,
-        )
         return details
 
     def grouped_recall_at_k(
@@ -299,6 +431,7 @@ class AdvancedMetrics:
 
         results.update(self.grouped_recall_at_k_details(embeddings, labels, k=self.k, group_size=10))
         results.update(self.opis_details(embeddings, labels))
+        results.update(self._global_recall_at_k_details(embeddings, labels, k=1))
 
         results["nmi"] = results["normalized_mutual_info"]
         results["ami"] = results["adjusted_mutual_info"]
@@ -324,6 +457,11 @@ class AdvancedMetrics:
         results["adjusted_rand_index"] = results.get("adjusted_rand_index", 0)
         results["normalized_mutual_info"] = results.get("normalized_mutual_info", 0)
         results["silhouette_score"] = results.get("silhouette_score", 0)
+        results["global_recall_at_1"] = results.get("global_recall_at_k", 0)
+        results["global_recall_at_1_chance_exact"] = results.get("global_recall_chance_at_k_exact", 0.0)
+        results["global_recall_at_1_chance_approx"] = results.get("global_recall_chance_at_k_approx", 0.0)
+        results["global_recall_at_1_num_classes"] = results.get("global_recall_num_classes", 0)
+        results["global_recall_at_1_num_samples"] = results.get("global_recall_num_samples", 0)
 
         return results
 
