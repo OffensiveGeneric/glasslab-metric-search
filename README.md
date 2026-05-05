@@ -139,8 +139,8 @@ Metrics use the pattern `{split}_{run_type}_{metric_name}`:
 |----------|-----------|-------------|-------|
 | Random Embedding | ~5% Global@1, ~41% Grouped@5 | ~5% Global@1, ~41% Grouped@5 | Chance-level baseline |
 | ResNet-50 (supervised) | ~92% Grouped@5, ~39% Global@1 | ~83% Global@1, ~92% Grouped@5 | Strong ImageNet transfer |
-| DINO ViT (self-supervised) | ~97% Grouped@5, ~53% Global@1 | ~97% Grouped@5, ~82% Global@1 | Self-supervised ViT |
-| CLIP (zero-shot multimodal) | ~96.75% Grouped@5, ~77.6% Global@1 | ~96.75% Grouped@5, ~77.6% Global@1 | Zero-shot CLIP |
+| DINO ViT (self-supervised) | ~96% Grouped@5, ~53% Global@1 | ~97% Grouped@5, ~82% Global@1 | Self-supervised ViT |
+| CLIP (zero-shot multimodal) | ~95% Grouped@5, ~50% Global@1 | ~97% Grouped@5, ~78% Global@1 | Zero-shot CLIP |
 
 ### Baseline Expectations
 

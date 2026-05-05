@@ -25,8 +25,8 @@ Deep metric learning evaluation pipeline has been validated with comprehensive b
 2. **Baseline results** (all passing sanity checks):
    - **Random Embedding**: test_unseen Global@1=41% (expected ~41%), sanity pass ✅
    - **ResNet-50**: test_unseen Global@1=68.2%, Grouped@5=92%, sanity pass ✅
-    - **DINO ViT**: test_unseen Global@1=81.8%, Grouped@5=97.2%, sanity pass ✅ (note: DINO test_seen Global@1=53% per artifact)
-   - **CLIP**: test_unseen Global@1=77.6%, Grouped@5=96.75%, sanity pass ✅
+    - **DINO ViT**: test_seen Global@1=53%, test_unseen Global@1=81.8%, Grouped@5=97.2%, sanity pass ✅ (note: DINO test_seen Global@1=53% per artifact)
+    - **CLIP**: test_seen Global@1=50%, test_unseen Global@1=77.6%, Grouped@5=96.75%, sanity pass ✅
 
 3. **Documentation**:
    - Created comprehensive README.md for glasslab-metric-search
