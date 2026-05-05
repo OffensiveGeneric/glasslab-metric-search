@@ -1,0 +1,41 @@
+workflow_family: cifar100-smoke-test
+search_space_id: cifar100-smoke-test-v0
+dataset:
+  dataset_id: cifar100-unseen-classes
+  split_version: split-2026-04-a
+  train_uri: s3://datasets/cifar100/train_seen.parquet
+  val_uri: s3://datasets/cifar100/val_seen.parquet
+  test_uri: s3://datasets/cifar100/test_seen.parquet
+resources:
+  gpu_count: 1
+  cpu_count: 4
+  memory_gb: 16
+budget:
+  max_epochs: 1
+  max_wallclock_minutes: 30
+  max_train_batches: 1
+  max_eval_batches: 8
+experiment:
+  pipeline: contrastive_learning
+  dataset_uri: s3://datasets/cifar100/
+  model_family: resnet50_contrastive
+  training_notes: "Smoke test: 1 epoch, 1 train batch, 8 eval batches"
+  evaluation_target: Pipeline validation
+  validation_strategy: stratified_seen_unseen_split
+  loss_name: contrastive
+  margin: 0.1
+  temperature: 0.1
+  batch_size: 32
+  learning_rate: 0.0001
+  backbone_name: resnet50
+  max_epochs: 1
+search_space:
+  mutable_fields:
+    model_family: [resnet50_contrastive]
+    loss_name: [contrastive]
+    margin: [0.1]
+    temperature: [0.1]
+    batch_size: [32]
+    learning_rate: [0.0001]
+    backbone_name: [resnet50]
+    max_epochs: [1]
