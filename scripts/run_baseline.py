@@ -512,9 +512,10 @@ def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Pat
     
     all_metrics = convert_to_native(all_metrics)
     
-    # Save metrics
+    # Save metrics with normalized baseline name (remove "frozen_" prefix)
+    normalized_baseline_name = baseline_name.replace("frozen_", "")
     output_dir.mkdir(parents=True, exist_ok=True)
-    metrics_path = output_dir / f"{baseline_name}_metrics.json"
+    metrics_path = output_dir / f"{normalized_baseline_name}_metrics.json"
     metrics_path.write_text(
         json.dumps(all_metrics, indent=2, sort_keys=True) + "\n",
         encoding="utf-8"
