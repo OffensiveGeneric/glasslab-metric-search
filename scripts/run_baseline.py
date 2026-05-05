@@ -535,15 +535,16 @@ def main():
                        choices=["random", "resnet50", "dino", "clip"],
                        help="Which baseline to run")
     parser.add_argument("--output-dir", type=str, default="baselines",
-                       help="Output directory for results")
+                        help="Output directory for results")
     parser.add_argument("--max-eval-batches", type=int, default=100,
-                       help="Maximum evaluation batches")
+                        help="Maximum evaluation batches")
     parser.add_argument("--run-shuffled", action="store_true",
-                       help="Also run shuffled label baseline for comparison")
+                        help="Also run shuffled label baseline for comparison")
     
     args = parser.parse_args()
     
-    output_dir = Path(args.output_dir) / args.baseline
+    # Use output_dir directly without adding baseline name (user controls path)
+    output_dir = Path(args.output_dir)
     
     # Map baseline name to function
     baseline_funcs = {
