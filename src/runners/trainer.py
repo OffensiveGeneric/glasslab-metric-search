@@ -667,6 +667,7 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
         if random_global_recall is not None and random_global_chance is not None:
             random_global_abs_error = abs(float(random_global_recall) - float(random_global_chance))
             if random_global_abs_error > 0.03:
+                model_quality_interpretable = False
                 sanity_warnings.append(
                     f"{split_name} random-embedding global Recall@1 ({random_global_recall:.4f}) "
                     f"not near exact chance ({random_global_chance:.4f}); error={random_global_abs_error:.4f}"
