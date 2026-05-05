@@ -374,11 +374,11 @@ def compute_metrics_for_embeddings(embeddings_dict: dict, config: Config, split_
         prefixed_metrics[f"{normalized_split_name}_random_embedding_{key}"] = value
     
     # Compute lift metrics for random embeddings
-    real_recall = prefixed_metrics.get(f"{split_name}_grouped_recall_at_k")
-    random_recall = prefixed_metrics.get(f"{split_name}_random_embedding_grouped_recall_at_k")
+    real_recall = prefixed_metrics.get(f"{normalized_split_name}_grouped_recall_at_k")
+    random_recall = prefixed_metrics.get(f"{normalized_split_name}_random_embedding_grouped_recall_at_k")
     
     if real_recall is not None and random_recall is not None:
-        prefixed_metrics[f"{split_name}_grouped_recall_lift_vs_random_embeddings"] = real_recall - random_recall
+        prefixed_metrics[f"{normalized_split_name}_grouped_recall_lift_vs_random_embeddings"] = real_recall - random_recall
     
     return prefixed_metrics
 

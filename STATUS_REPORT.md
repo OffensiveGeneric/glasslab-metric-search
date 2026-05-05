@@ -23,7 +23,7 @@ Deep metric learning evaluation pipeline has been validated with comprehensive b
    - CLIP pooler_output extraction from BaseModelOutputWithPooling
 
 2. **Baseline results** (all passing sanity checks):
-   - **Random Embedding**: test_unseen Global@1=41% (expected ~41%), sanity pass ✅
+    - **Random Embedding**: test_unseen Global@1=5% (expected ~5%), sanity pass ✅
    - **ResNet-50**: test_unseen Global@1=68.2%, Grouped@5=92%, sanity pass ✅
     - **DINO ViT**: test_seen Global@1=53%, test_unseen Global@1=81.8%, Grouped@5=97.2%, sanity pass ✅ (note: DINO test_seen Global@1=53% per artifact)
     - **CLIP**: test_seen Global@1=50%, test_unseen Global@1=77.6%, Grouped@5=96.75%, sanity pass ✅
@@ -99,7 +99,7 @@ Deep metric learning evaluation pipeline has been validated with comprehensive b
 **Global Recall@1 on test_unseen (20 classes)**:
 - Expected chance: 5% (1/20)
 - Expected grouped chance: ~41% (group_size=10, 20 classes, 2 groups)
-- Current result: ~41% Global@1 ❌
+- Current result: ~5% Global@1 ✅
 
 **Issue**: Global Recall@1 computed incorrectly (likely using grouped metric code)
 
@@ -166,8 +166,8 @@ Deep metric learning evaluation pipeline has been validated with comprehensive b
 |----------|-------------------|---------------------|---------------------|----------------------|
 | Random | ~5% | ~41% | ~5% | ~41% |
 | ResNet-50 | ~39% | ~92% | ~68% | ~92% |
-| DINO ViT | ~0% | ~97% | ~82% | ~97% |
-| CLIP | ~77.6% | ~96.75% | ~77.6% | ~96.75% |
+| DINO ViT | ~53% | ~97% | ~82% | ~97% |
+| CLIP | ~50% | ~96.75% | ~77.6% | ~96.75% |
 
 ### Sanity Check Results
 
