@@ -139,7 +139,7 @@ Metrics use the pattern `{split}_{run_type}_{metric_name}`:
 |----------|-----------|-------------|-------|
 | Random Embedding | ~5% Global@1, ~41% Grouped@5 | ~5% Global@1, ~41% Grouped@5 | Chance-level baseline |
 | ResNet-50 (supervised) | ~92% Grouped@5, ~39% Global@1 | ~83% Global@1, ~92% Grouped@5 | Strong ImageNet transfer |
-| DINO ViT (self-supervised) | ~97% Grouped@5, ~0% Global@1 | ~97% Grouped@5, ~82% Global@1 | Self-supervised ViT |
+| DINO ViT (self-supervised) | ~97% Grouped@5, ~53% Global@1 | ~97% Grouped@5, ~82% Global@1 | Self-supervised ViT |
 | CLIP (zero-shot multimodal) | ~96.75% Grouped@5, ~77.6% Global@1 | ~96.75% Grouped@5, ~77.6% Global@1 | Zero-shot CLIP |
 
 ### Baseline Expectations
@@ -150,10 +150,11 @@ Metrics use the pattern `{split}_{run_type}_{metric_name}`:
 - Grouped Recall@5 (group_size=10): ~41% (analytic chance calculation)
 
 **Sanity Checks**:
-- Global Recall@1 should match exact chance (within 0.03)
-- Grouped Recall@K should match grouped chance (within 0.03)
+- Global Recall@1 should match exact chance (within 0.03) - validates no embedding leakage
+- Grouped Recall@K should match grouped chance (within 0.03) - validates no clustering signal
 - Negative silhouette scores indicate poor cluster separation
 - Model quality is not interpretable if random baseline fails sanity checks
+- **Note**: Strong baseline performance indicates evaluation pipeline is working, not that trained models generalize well
 
 See `docs/cifar100-unseen-classes.md` and `docs/evaluation-protocol.md` for full details.
 

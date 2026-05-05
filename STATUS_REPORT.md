@@ -8,7 +8,7 @@
 Deep metric learning evaluation pipeline has been validated with comprehensive baselines:
 - **Sanity checks passed**: Random embeddings achieve expected chance performance
 - **Strong baseline results**: ResNet-50, DINO, CLIP achieve 68-97% recall on unseen classes
-- **Pipeline ready**: Metrics infrastructure complete, AutoML ready, cluster deployment ready
+- **Pipeline validated**: Baselines confirm evaluation metrics and sanity checks working correctly
 
 ## Recent Accomplishments
 
@@ -25,7 +25,7 @@ Deep metric learning evaluation pipeline has been validated with comprehensive b
 2. **Baseline results** (all passing sanity checks):
    - **Random Embedding**: test_unseen Global@1=41% (expected ~41%), sanity pass ✅
    - **ResNet-50**: test_unseen Global@1=68.2%, Grouped@5=92%, sanity pass ✅
-   - **DINO ViT**: test_unseen Global@1=81.8%, Grouped@5=97.2%, sanity pass ✅
+    - **DINO ViT**: test_unseen Global@1=81.8%, Grouped@5=97.2%, sanity pass ✅ (note: DINO test_seen Global@1=53% per artifact)
    - **CLIP**: test_unseen Global@1=77.6%, Grouped@5=96.75%, sanity pass ✅
 
 3. **Documentation**:
@@ -159,6 +159,8 @@ Deep metric learning evaluation pipeline has been validated with comprehensive b
 ## Key Metrics
 
 ### Baseline Results Summary
+
+**Important**: Baseline results validate the evaluation pipeline, not model quality. Strong baseline performance (e.g., 97% recall) indicates the metrics and evaluation protocol are working correctly, not that trained models generalize well to unseen classes.
 
 | Baseline | Test Seen Global@1 | Test Seen Grouped@5 | Test Unseen Global@1 | Test Unseen Grouped@5 |
 |----------|-------------------|---------------------|---------------------|----------------------|
