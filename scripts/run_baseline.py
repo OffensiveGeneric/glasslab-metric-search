@@ -363,12 +363,15 @@ def compute_metrics_for_embeddings(embeddings_dict: dict, config: Config, split_
     )
     random_metrics = metrics_fn.compute_all_metrics(random_embeddings, labels)
     
+    # Normalize split_name to remove _0 suffix for consistent metric keys
+    normalized_split_name = split_name.replace("_0", "")
+    
     prefixed_metrics = {}
     for key, value in split_metrics.items():
-        prefixed_metrics[f"{split_name}_{key}"] = value
+        prefixed_metrics[f"{normalized_split_name}_{key}"] = value
     
     for key, value in random_metrics.items():
-        prefixed_metrics[f"{split_name}_random_embedding_{key}"] = value
+        prefixed_metrics[f"{normalized_split_name}_random_embedding_{key}"] = value
     
     # Compute lift metrics for random embeddings
     real_recall = prefixed_metrics.get(f"{split_name}_grouped_recall_at_k")
@@ -440,43 +443,40 @@ def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Pat
         
         if shuffled_val_embeddings is not None:
             shuffled_val_metrics = compute_metrics_for_embeddings({"val_seen_0_embeddings": shuffled_val_embeddings, "val_seen_0_labels": shuffled_val_labels}, config, "val_seen_0")
-            shuffled_val_metrics = {k.replace("val_seen_0_", "val_seen_0_shuffled_"): v for k, v in shuffled_val_metrics.items()}
+            # Keys are already normalized by compute_metrics_for_embeddings, just add shuffled_ suffix
+            shuffled_val_metrics = {k.replace("val_seen_", "val_seen_shuffled_").replace("test_seen_", "test_seen_shuffled_").replace("test_unseen_", "test_unseen_shuffled_"): v for k, v in shuffled_val_metrics.items()}
             all_metrics.update(shuffled_val_metrics)
         
         if shuffled_test_seen_embeddings is not None:
             shuffled_test_seen_metrics = compute_metrics_for_embeddings({"test_seen_0_embeddings": shuffled_test_seen_embeddings, "test_seen_0_labels": shuffled_test_seen_labels}, config, "test_seen_0")
-            shuffled_test_seen_metrics = {k.replace("test_seen_0_", "test_seen_0_shuffled_"): v for k, v in shuffled_test_seen_metrics.items()}
+            shuffled_test_seen_metrics = {k.replace("val_seen_", "val_seen_shuffled_").replace("test_seen_", "test_seen_shuffled_").replace("test_unseen_", "test_unseen_shuffled_"): v for k, v in shuffled_test_seen_metrics.items()}
             all_metrics.update(shuffled_test_seen_metrics)
         
         if shuffled_test_unseen_embeddings is not None:
             shuffled_test_unseen_metrics = compute_metrics_for_embeddings({"test_unseen_0_embeddings": shuffled_test_unseen_embeddings, "test_unseen_0_labels": shuffled_test_unseen_labels}, config, "test_unseen_0")
-            shuffled_test_unseen_metrics = {k.replace("test_unseen_0_", "test_unseen_0_shuffled_"): v for k, v in shuffled_test_unseen_metrics.items()}
+            shuffled_test_unseen_metrics = {k.replace("val_seen_", "val_seen_shuffled_").replace("test_seen_", "test_seen_shuffled_").replace("test_unseen_", "test_unseen_shuffled_"): v for k, v in shuffled_test_unseen_metrics.items()}
             all_metrics.update(shuffled_test_unseen_metrics)
         
         # Compute lift over shuffled labels for all splits
-        val_metrics = {k.replace("_shuffled", ""): v for k, v in all_metrics.items() if k.endswith("_shuffled")}
-        test_seen_metrics = {k.replace("_shuffled", ""): v for k, v in all_metrics.items() if k.endswith("_shuffled")}
-        test_unseen_metrics = {k.replace("_shuffled", ""): v for k, v in all_metrics.items() if k.endswith("_shuffled")}
-        
-        if "val_seen_0_shuffled_grouped_recall_at_k" in all_metrics and "val_seen_0_grouped_recall_at_k" in all_metrics:
-            shuffled_val_recall = all_metrics["val_seen_0_shuffled_grouped_recall_at_k"]
-            real_val_recall = all_metrics["val_seen_0_grouped_recall_at_k"]
+        if "val_seen_shuffled_grouped_recall_at_k" in all_metrics and "val_seen_grouped_recall_at_k" in all_metrics:
+            shuffled_val_recall = all_metrics["val_seen_shuffled_grouped_recall_at_k"]
+            real_val_recall = all_metrics["val_seen_grouped_recall_at_k"]
             lift_val = real_val_recall - shuffled_val_recall
-            all_metrics["val_seen_0_grouped_recall_lift_vs_shuffled_labels"] = lift_val
+            all_metrics["val_seen_grouped_recall_lift_vs_shuffled_labels"] = lift_val
             print(f"Lift over shuffled labels (val_seen): {lift_val:.4f}")
         
-        if "test_seen_0_shuffled_grouped_recall_at_k" in all_metrics and "test_seen_0_grouped_recall_at_k" in all_metrics:
-            shuffled_test_seen_recall = all_metrics["test_seen_0_shuffled_grouped_recall_at_k"]
-            real_test_seen_recall = all_metrics["test_seen_0_grouped_recall_at_k"]
+        if "test_seen_shuffled_grouped_recall_at_k" in all_metrics and "test_seen_grouped_recall_at_k" in all_metrics:
+            shuffled_test_seen_recall = all_metrics["test_seen_shuffled_grouped_recall_at_k"]
+            real_test_seen_recall = all_metrics["test_seen_grouped_recall_at_k"]
             lift_test_seen = real_test_seen_recall - shuffled_test_seen_recall
-            all_metrics["test_seen_0_grouped_recall_lift_vs_shuffled_labels"] = lift_test_seen
+            all_metrics["test_seen_grouped_recall_lift_vs_shuffled_labels"] = lift_test_seen
             print(f"Lift over shuffled labels (test_seen): {lift_test_seen:.4f}")
         
-        if "test_unseen_0_shuffled_grouped_recall_at_k" in all_metrics and "test_unseen_0_grouped_recall_at_k" in all_metrics:
-            shuffled_test_unseen_recall = all_metrics["test_unseen_0_shuffled_grouped_recall_at_k"]
-            real_test_unseen_recall = all_metrics["test_unseen_0_grouped_recall_at_k"]
+        if "test_unseen_shuffled_grouped_recall_at_k" in all_metrics and "test_unseen_grouped_recall_at_k" in all_metrics:
+            shuffled_test_unseen_recall = all_metrics["test_unseen_shuffled_grouped_recall_at_k"]
+            real_test_unseen_recall = all_metrics["test_unseen_grouped_recall_at_k"]
             lift_test_unseen = real_test_unseen_recall - shuffled_test_unseen_recall
-            all_metrics["test_unseen_0_grouped_recall_lift_vs_shuffled_labels"] = lift_test_unseen
+            all_metrics["test_unseen_grouped_recall_lift_vs_shuffled_labels"] = lift_test_unseen
             print(f"Lift over shuffled labels (test_unseen): {lift_test_unseen:.4f}")
         
 
