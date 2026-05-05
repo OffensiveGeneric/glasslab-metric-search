@@ -445,17 +445,26 @@ def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Pat
             shuffled_val_metrics = compute_metrics_for_embeddings({"val_seen_0_embeddings": shuffled_val_embeddings, "val_seen_0_labels": shuffled_val_labels}, config, "val_seen_0")
             # Keys are already normalized by compute_metrics_for_embeddings, just add shuffled_ suffix
             shuffled_val_metrics = {k.replace("val_seen_", "val_seen_shuffled_").replace("test_seen_", "test_seen_shuffled_").replace("test_unseen_", "test_unseen_shuffled_"): v for k, v in shuffled_val_metrics.items()}
-            all_metrics.update(shuffled_val_metrics)
+            # Don't overwrite existing metrics (e.g., lift_vs_random)
+            for k, v in shuffled_val_metrics.items():
+                if k not in all_metrics:
+                    all_metrics[k] = v
         
         if shuffled_test_seen_embeddings is not None:
             shuffled_test_seen_metrics = compute_metrics_for_embeddings({"test_seen_0_embeddings": shuffled_test_seen_embeddings, "test_seen_0_labels": shuffled_test_seen_labels}, config, "test_seen_0")
             shuffled_test_seen_metrics = {k.replace("val_seen_", "val_seen_shuffled_").replace("test_seen_", "test_seen_shuffled_").replace("test_unseen_", "test_unseen_shuffled_"): v for k, v in shuffled_test_seen_metrics.items()}
-            all_metrics.update(shuffled_test_seen_metrics)
+            # Don't overwrite existing metrics (e.g., lift_vs_random)
+            for k, v in shuffled_test_seen_metrics.items():
+                if k not in all_metrics:
+                    all_metrics[k] = v
         
         if shuffled_test_unseen_embeddings is not None:
             shuffled_test_unseen_metrics = compute_metrics_for_embeddings({"test_unseen_0_embeddings": shuffled_test_unseen_embeddings, "test_unseen_0_labels": shuffled_test_unseen_labels}, config, "test_unseen_0")
             shuffled_test_unseen_metrics = {k.replace("val_seen_", "val_seen_shuffled_").replace("test_seen_", "test_seen_shuffled_").replace("test_unseen_", "test_unseen_shuffled_"): v for k, v in shuffled_test_unseen_metrics.items()}
-            all_metrics.update(shuffled_test_unseen_metrics)
+            # Don't overwrite existing metrics (e.g., lift_vs_random)
+            for k, v in shuffled_test_unseen_metrics.items():
+                if k not in all_metrics:
+                    all_metrics[k] = v
         
         # Compute lift over shuffled labels for all splits
         if "val_seen_shuffled_grouped_recall_at_k" in all_metrics and "val_seen_grouped_recall_at_k" in all_metrics:
