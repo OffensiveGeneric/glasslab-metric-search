@@ -6,9 +6,10 @@ import torch
 import numpy as np
 import os
 from torchvision import datasets, transforms
-from torch.utils.data import DataLoader, Subset
-from typing import Tuple, List
+from torch.utils.data import DataLoader, Subset, Sampler
+from typing import Tuple, List, Dict
 from src.config import Config
+from src.data.resolver import resolve_dataset, DatasetSource, TorchvisionSource
 import random
 
 
@@ -49,6 +50,15 @@ class Cifar100Splitter:
         if torch.cuda.is_available():
             torch.cuda.manual_seed(self.seed)
             
+    def _resolve_dataset_source(self) -> DatasetSource:
+        """Resolve dataset source from config"""
+        if hasattr(self.config.data, "source"):
+            return resolve_dataset(self.config.data.source)
+        else:
+            # Default: use torchvision CIFAR-100
+            root = find_cifar100_data_root()
+            return TorchvisionSource(name="cifar100", root=root, download=True)
+    
     def create_stratified_splits(self) -> Tuple[List[int], List[int]]:
         """Create stratified class splits for reproducibility across multiple seeds"""
         all_classes = list(range(100))
@@ -144,21 +154,10 @@ class Cifar100Splitter:
             )
         ])
         
-        # Load full datasets
-        data_root = find_cifar100_data_root()
-        full_train = datasets.CIFAR100(
-            root=data_root,
-            train=True,
-            download=True,
-            transform=transform_train
-        )
-        
-        full_test = datasets.CIFAR100(
-            root=data_root,
-            train=False,
-            download=True,
-            transform=transform_test
-        )
+        # Load full datasets using resolver
+        dataset_source = self._resolve_dataset_source()
+        full_train = dataset_source.load(train=True)
+        full_test = dataset_source.load(train=False)
         
         # Create splits
         seen_classes_list, unseen_classes_list = self.create_stratified_splits()
@@ -197,6 +196,39 @@ class Cifar100Splitter:
             dataloaders[f"unseen_classes_{i}"] = unseen_classes
         
         return dataloaders
+
+
+class ClassBalancedSampler(Sampler):
+    """Class-balanced sampler that ensures each batch has equal representation from each class."""
+    
+    def __init__(self, dataset, batch_size, num_classes_per_batch=None):
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.num_classes = len(np.unique(dataset.targets))
+        self.num_classes_per_batch = num_classes_per_batch or min(self.num_classes, batch_size // 2)
+        self.samples_per_class = batch_size // self.num_classes_per_batch
+        
+        self.class_to_indices = {}
+        for idx, label in enumerate(dataset.targets):
+            if label not in self.class_to_indices:
+                self.class_to_indices[label] = []
+            self.class_to_indices[label].append(idx)
+        
+        self.num_batches = min(len(indices) // self.samples_per_class 
+                               for indices in self.class_to_indices.values())
+    
+    def __iter__(self):
+        for _ in range(self.num_batches):
+            batch = []
+            classes = np.random.choice(list(self.class_to_indices.keys()), 
+                                      self.num_classes_per_batch, replace=False)
+            for cls in classes:
+                indices = self.class_to_indices[cls]
+                batch.extend(np.random.choice(indices, self.samples_per_class, replace=False))
+            yield batch
+    
+    def __len__(self):
+        return self.num_batches
 
 
 def get_dataloaders(config: Config) -> dict:

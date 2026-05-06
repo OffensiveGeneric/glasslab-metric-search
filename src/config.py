@@ -36,30 +36,42 @@ class AugmentationConfig:
 class LossConfig:
     contrastive: dict = field(default_factory=lambda: {
         "margin": 1.0,
-        "distance_metric": "cosine"
+        "distance_metric": "cosine",
+        "status": "implemented",
+        "notes": "Basic pairwise contrastive loss"
     })
     triplet: dict = field(default_factory=lambda: {
         "margin": 0.3,
-        "miner": "semi_hard"
+        "miner": "semi_hard",
+        "status": "implemented",
+        "notes": "Triplet loss with naive in-batch sampling"
     })
     shadow: dict = field(default_factory=lambda: {
         "projection_dim": 1,
-        "learnable_projection": True
+        "learnable_projection": True,
+        "status": "experimental",
+        "notes": "Shadow loss for projection-based learning"
     })
     multi_similarity: dict = field(default_factory=lambda: {
         "margin": 0.05,
-        "temperature": 0.05
+        "temperature": 0.05,
+        "status": "stub",
+        "notes": "Multi-similarity loss - not yet implemented"
     })
     proxy_anchor: dict = field(default_factory=lambda: {
         "num_classes": 100,
         "embedding_dim": 512,
         "margin": 0.05,
-        "temperature": 0.05
+        "temperature": 0.05,
+        "status": "stub",
+        "notes": "Proxy-anchor loss - not yet implemented"
     })
     proxy_gml: dict = field(default_factory=lambda: {
         "num_classes": 100,
         "embedding_dim": 512,
-        "margin": 0.05
+        "margin": 0.05,
+        "status": "stub",
+        "notes": "Proxy-GML loss - not yet implemented"
     })
 
 
@@ -94,6 +106,8 @@ class HPOConfig:
         "learning_rate": [1e-5, 1e-3],
         "margin": [0.1, 1.0]
     })
+    status: str = "experimental"
+    notes: str = "Hyperparameter optimization via Optuna"
 
 
 @dataclass
@@ -105,6 +119,8 @@ class EvaluationConfig:
     threshold_range: List[float] = field(default_factory=lambda: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
     num_groups: int = 4
     statistical_test: str = "5x2cv"
+    status: str = "implemented"
+    notes: str = "Advanced metrics including grouped recall, OPI, and statistical tests"
 
 
 @dataclass
@@ -115,6 +131,8 @@ class L2ANCConfig:
     synthetic_classes_per_batch: int = 4
     kl_divergence_weight: float = 1.0
     num_synthetic_samples_per_class: int = 100
+    status: str = "experimental"
+    notes: str = "L2A-NC: Latent distribution alignment for novelty detection"
 
 
 @dataclass

@@ -9,7 +9,6 @@ import argparse
 import json
 import os
 import sys
-import sqlite3
 from pathlib import Path
 
 # Log image commit if available
@@ -34,7 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.config import Config
 from src.data.dataset import Cifar100Splitter
 from src.models.backbone import Backbone
-from src.metrics.metrics import AdvancedMetrics
+from src.evaluation import collect_embeddings, compute_metrics, compute_random_baseline, compute_shuffled_baseline
+from src.evaluation.reports import serialize_metrics, generate_report
 import timm
 
 
@@ -343,28 +343,40 @@ def get_frozen_clip_embeddings(dataloaders: dict, device: str, max_eval_batches:
 
 
 
-def compute_metrics_for_embeddings(embeddings_dict: dict, config: Config, split_name: str) -> dict:
-    """Compute metrics for a single split's embeddings"""
+def compute_metrics_for_embeddings(
+    embeddings_dict: dict,
+    config: Config,
+    split_name: str,
+    warnings: list[str] | None = None,
+) -> dict:
+    """Compute metrics for a single split's embeddings using shared evaluation code
+    
+    Args:
+        embeddings_dict: Dictionary with {split_name}_embeddings and {split_name}_labels
+        config: Experiment config
+        split_name: Split name (e.g., "val_seen_0", "test_seen_0", "test_unseen_0")
+        warnings: Optional list to collect warnings
+        
+    Returns:
+        Dictionary of normalized metrics
+    """
+    if warnings is None:
+        warnings = []
+    
     embeddings = embeddings_dict.get(f"{split_name}_embeddings")
     labels = embeddings_dict.get(f"{split_name}_labels")
     
     if embeddings is None or labels is None:
         return {}
     
-    metrics_fn = AdvancedMetrics(config)
-    split_metrics = metrics_fn.compute_all_metrics(embeddings, labels)
-    
-    # Compute random embedding baseline
-    generator = torch.Generator().manual_seed(int(config.data.seed) + 17)
-    random_embeddings = torch.randn(
-        embeddings.shape,
-        generator=generator,
-        dtype=embeddings.dtype,
-    )
-    random_metrics = metrics_fn.compute_all_metrics(random_embeddings, labels)
-    
-    # Normalize split_name to remove _0 suffix for consistent metric keys
+    # Use shared evaluation code
     normalized_split_name = split_name.replace("_0", "")
+    
+    # Compute main metrics
+    split_metrics = compute_metrics(embeddings, labels, config, warnings, f"{normalized_split_name} embeddings")
+    
+    # Compute random embedding baseline (always run for sanity check)
+    random_metrics = compute_random_baseline(embeddings, labels, config, warnings, f"{normalized_split_name} random")
     
     prefixed_metrics = {}
     for key, value in split_metrics.items():
@@ -495,34 +507,21 @@ def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Pat
     all_metrics["mode"] = "baseline"
     all_metrics["simulated"] = False
     
-    # Convert numpy types to Python native types for JSON serialization
-    def convert_to_native(obj):
-        """Convert numpy types to Python native types for JSON serialization"""
-        if isinstance(obj, dict):
-            return {k: convert_to_native(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [convert_to_native(v) for v in obj]
-        elif hasattr(obj, 'item'):  # numpy scalar
-            return obj.item()
-        elif isinstance(obj, (np.float32, np.float64)):
-            return float(obj)
-        elif isinstance(obj, (np.int32, np.int64)):
-            return int(obj)
-        return obj
-    
-    all_metrics = convert_to_native(all_metrics)
+    # Use shared evaluation code for metrics serialization (handles numpy types)
+    metrics_json = serialize_metrics(all_metrics)
     
     # Save metrics with normalized baseline name (remove "frozen_" prefix)
     normalized_baseline_name = baseline_name.replace("frozen_", "")
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = output_dir / f"{normalized_baseline_name}_metrics.json"
-    metrics_path.write_text(
-        json.dumps(all_metrics, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8"
-    )
+    metrics_path.write_text(metrics_json + "\n", encoding="utf-8")
     
-    # Save report
-    report_path = output_dir / f"{baseline_name}_report.md"
+    # Generate report using shared code
+    # Generate report using shared code (automatically creates both metrics.json and report.md)
+    generate_report(all_metrics, output_dir, f"{normalized_baseline_name}_metrics.json")
+    
+    # Also create markdown report
+    report_path = output_dir / f"{normalized_baseline_name}_report.md"
     
     # Compute shuffled metrics for report if available
     shuffled_test_unseen_recall = all_metrics.get("test_unseen_shuffled_grouped_recall_at_k", "N/A")
@@ -532,8 +531,8 @@ def run_baseline_experiment(baseline_name: str, embeddings_func, output_dir: Pat
     lift_vs_random = all_metrics.get("test_unseen_grouped_recall_lift_vs_random_embeddings", "N/A")
     
     report_content = (
-        f"# Baseline Experiment Report: {baseline_name}\n\n"
-        f"- baseline: `{baseline_name}`\n"
+        f"# Baseline Experiment Report: {normalized_baseline_name}\n\n"
+        f"- baseline: `{normalized_baseline_name}`\n"
         f"- mode: {all_metrics.get('mode', 'baseline')}\n"
         f"- simulated: {all_metrics.get('simulated', False)}\n"
         f"\n## Per-Split Metrics\n\n"

@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from search.run_spec import RunSpec
 from src.config import Config
 from src.data.dataset import get_dataloaders
-from src.losses.losses import SupervisedContrastiveLoss, TripletLoss
+from src.losses.factory import create_loss, check_loss_supported, get_loss_spec
 from src.models.backbone import ModelFactory
 from src.metrics.metrics import AdvancedMetrics
 
@@ -424,12 +424,14 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
                     config.augmentation = AugmentationConfig(**value)
             elif key == "loss":
                 loss_name = run_spec.config.get("loss_name", value.get("name", "contrastive"))
-                if loss_name == "contrastive":
-                    config.loss = LossConfig(contrastive=value)
-                elif loss_name == "triplet":
-                    config.loss = LossConfig(triplet=value)
+                if not check_loss_supported(loss_name):
+                    raise ValueError(f"Unsupported loss '{loss_name}'. Supported losses: {list_supported_losses()}")
+                # Store loss config in loss dict
+                if hasattr(config.loss, "__setitem__"):
+                    config.loss.__setitem__(loss_name, value)
                 else:
-                    config.loss = LossConfig(**{loss_name: value})
+                    # Fallback: update loss config directly
+                    setattr(config.loss, loss_name, value)
             elif key == "model":
                 if isinstance(config.model, ModelConfig):
                     config.model = ModelConfig(**value)
@@ -473,14 +475,13 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
                     flat_config_map[key](value)
         
         loss_name = run_spec.config.get("loss_name", "contrastive")
-        if loss_name == "triplet":
-            margin = run_spec.config.get("margin", 0.3)
-            loss_fn = TripletLoss(margin=margin)
-        elif loss_name == "contrastive":
-            loss_config = config.loss.contrastive if hasattr(config.loss.contrastive, "get") else {}
-            loss_fn = SupervisedContrastiveLoss(temperature=loss_config.get("temperature", 0.1))
-        else:
-            raise NotImplementedError(f"Unsupported loss: {loss_name}")
+        if not check_loss_supported(loss_name):
+            raise ValueError(f"Unsupported loss '{loss_name}'. Supported losses: {list_supported_losses()}")
+        
+        try:
+            loss_fn = create_loss(loss_name, run_spec.config.get(loss_name, {}))
+        except NotImplementedError as e:
+            raise NotImplementedError(f"Loss '{loss_name}' not implemented: {e}")
     apply_run_config_overrides(config, run_spec.config or {}, run_spec.budget)
 
     dataloaders = get_dataloaders(config)
