@@ -133,7 +133,7 @@ class ModelFactory:
     def create_backbone(config, backbone_name: str) -> Backbone:
         """Create a backbone model"""
         # Check for synthetic MLP backbone
-        if backbone_name == "mlp" or backbone_name == "mlp_contrastive":
+        if backbone_name == "mlp" or backbone_name == "mlp_contrastive" or backbone_name == "synthetic" or backbone_name == "synthetic_contrastive":
             return MLPBackbone(
                 input_dim=getattr(config.experiment if hasattr(config, 'experiment') else config, 'input_dim', 64),
                 hidden_dim=getattr(config.experiment if hasattr(config, 'experiment') else config, 'hidden_dim', 128),

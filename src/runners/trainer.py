@@ -382,6 +382,15 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
             loss_fn = create_loss(loss_name, loss_config or {})
         except NotImplementedError as e:
             raise NotImplementedError(f"Loss '{loss_name}' not implemented: {e}")
+    else:
+        # Default: create loss_fn unconditionally after config is processed
+        loss_name = run_spec.config.get("loss_name", "contrastive") if run_spec.config else "contrastive"
+        loss_config = getattr(config.loss, loss_name, {})
+        try:
+            loss_fn = create_loss(loss_name, loss_config)
+        except NotImplementedError as e:
+            raise NotImplementedError(f"Loss '{loss_name}' not implemented: {e}")
+    
     apply_run_config_overrides(config, run_spec.config or {}, run_spec.budget)
 
     dataloaders = get_dataloaders(config)

@@ -267,6 +267,29 @@ class ClassBalancedSampler(Sampler):
 
 
 def get_dataloaders(config: Config) -> dict:
-    """Convenience function to create all dataloaders"""
-    splitter = Cifar100Splitter(config)
-    return splitter.create_dataloaders()
+    """Convenience function to create all dataloaders
+    
+    Dispatches to appropriate dataloader creation based on dataset_id:
+    - synthetic-smoke: uses SyntheticDataset
+    - cifar100-unseen-classes: uses Cifar100Splitter
+    """
+    dataset_id = getattr(config.data, "dataset_id", "cifar100-unseen-classes")
+    
+    if dataset_id == "synthetic-smoke":
+        from src.data.synthetic.synthetic import create_synthetic_dataloaders
+        
+        # Get config values for synthetic dataset
+        num_classes = getattr(config.experiment if hasattr(config, 'experiment') else config, 'num_classes', 10)
+        samples_per_class = getattr(config.experiment if hasattr(config, 'experiment') else config, 'samples_per_class', 2)
+        input_dim = getattr(config.experiment if hasattr(config, 'experiment') else config, 'input_dim', 64)
+        batch_size = config.training.batch_size if hasattr(config, 'training') else 4
+        
+        return create_synthetic_dataloaders(
+            batch_size=batch_size,
+            num_classes=num_classes,
+            samples_per_class=samples_per_class,
+            embedding_dim=input_dim,
+        )
+    else:
+        splitter = Cifar100Splitter(config)
+        return splitter.create_dataloaders()

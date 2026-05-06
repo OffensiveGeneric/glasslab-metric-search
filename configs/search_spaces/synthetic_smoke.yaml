@@ -19,7 +19,7 @@ budget:
 experiment:
   pipeline: contrastive_learning
   dataset_uri: null
-  model_family: mlp_contrastive
+  model_family: synthetic_contrastive
   training_notes: "Synthetic smoke test: simple MLP on random features, no internet"
   evaluation_target: Local pipeline validation
   validation_strategy: train_val_test_split
@@ -43,5 +43,5 @@ search_space:
     temperature: [0.1]
     batch_size: [4, 8]
     learning_rate: [0.001, 0.0001]
-    backbone_name: [mlp]
+    backbone_name: [synthetic]
     max_epochs: [1]

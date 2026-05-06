@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.config import Config
 from src.data.dataset import Cifar100Splitter
 from src.models.backbone import Backbone
-from src.evaluation import collect_embeddings, compute_metrics, compute_random_baseline, compute_shuffled_baseline
+from src.evaluation import collect_embeddings, evaluate_embeddings, random_embedding_baseline, shuffled_label_baseline
 from src.evaluation.reports import serialize_metrics, generate_report
 import timm
 
@@ -373,10 +373,10 @@ def compute_metrics_for_embeddings(
     normalized_split_name = split_name.replace("_0", "")
     
     # Compute main metrics
-    split_metrics = compute_metrics(embeddings, labels, config, warnings, f"{normalized_split_name} embeddings")
+    split_metrics = evaluate_embeddings(embeddings, labels, config, warnings, f"{normalized_split_name} embeddings")
     
     # Compute random embedding baseline (always run for sanity check)
-    random_metrics = compute_random_baseline(embeddings, labels, config, warnings, f"{normalized_split_name} random")
+    random_metrics = random_embedding_baseline(embeddings, labels, config, warnings, f"{normalized_split_name} random")
     
     prefixed_metrics = {}
     for key, value in split_metrics.items():
