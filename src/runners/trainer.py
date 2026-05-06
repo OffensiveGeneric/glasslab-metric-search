@@ -464,6 +464,7 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
             "learning_rate": lambda v: setattr(config.training, "learning_rate", v),
             "max_epochs": lambda v: setattr(config.training, "epochs", v),
             "temperature": lambda v: config.loss.contrastive.__setitem__("temperature", v) if isinstance(config.loss.contrastive, dict) else None,
+            "margin": lambda v: config.loss.triplet.__setitem__("margin", v) if isinstance(config.loss.triplet, dict) else None,
         }
         
         for key, value in run_spec.config.items():
@@ -472,8 +473,14 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
                     flat_config_map[key](value)
         
         loss_name = run_spec.config.get("loss_name", "contrastive")
-        if loss_name != "contrastive":
-            raise NotImplementedError(f"Only contrastive loss is supported in real mode, got: {loss_name}")
+        if loss_name == "triplet":
+            margin = run_spec.config.get("margin", 0.3)
+            loss_fn = TripletLoss(margin=margin)
+        elif loss_name == "contrastive":
+            loss_config = config.loss.contrastive if hasattr(config.loss.contrastive, "get") else {}
+            loss_fn = SupervisedContrastiveLoss(temperature=loss_config.get("temperature", 0.1))
+        else:
+            raise NotImplementedError(f"Unsupported loss: {loss_name}")
     apply_run_config_overrides(config, run_spec.config or {}, run_spec.budget)
 
     dataloaders = get_dataloaders(config)
@@ -486,9 +493,6 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
     backbone_name = config.model.backbones[0] if config.model.backbones else "resnet18"
     model = ModelFactory.create_backbone(config, backbone_name)
     model = model.to(device)
-
-    loss_config = config.loss.contrastive if hasattr(config.loss.contrastive, "get") else {}
-    loss_fn = SupervisedContrastiveLoss(temperature=loss_config.get("temperature", 0.1))
 
     optimizer = optim.AdamW(
         model.parameters(),
