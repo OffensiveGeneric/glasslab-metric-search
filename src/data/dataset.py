@@ -156,8 +156,8 @@ class Cifar100Splitter:
         
         # Load full datasets using resolver
         dataset_source = self._resolve_dataset_source()
-        full_train = dataset_source.load(train=True)
-        full_test = dataset_source.load(train=False)
+        full_train = dataset_source.load(train=True, transform=transform_train)
+        full_test = dataset_source.load(train=False, transform=transform_test)
         
         # Create splits
         seen_classes_list, unseen_classes_list = self.create_stratified_splits()
@@ -199,23 +199,54 @@ class Cifar100Splitter:
 
 
 class ClassBalancedSampler(Sampler):
-    """Class-balanced sampler that ensures each batch has equal representation from each class."""
+    """Class-balanced sampler that ensures each batch has equal representation from each class.
+    
+    Supports both direct datasets and Subset datasets (commonly used for seen/unseen splits).
+    """
     
     def __init__(self, dataset, batch_size, num_classes_per_batch=None):
         self.dataset = dataset
         self.batch_size = batch_size
-        self.num_classes = len(np.unique(dataset.targets))
+        
+        # Handle Subset datasets (commonly used for seen/unseen splits)
+        if hasattr(dataset, "indices"):
+            # Dataset is a Subset
+            self.dataset_indices = dataset.indices
+            # Get targets from underlying dataset
+            if hasattr(dataset.dataset, "targets"):
+                self.targets = np.array(dataset.dataset.targets)
+            else:
+                # Try to get targets from __getitem__
+                self.targets = np.array([dataset.dataset[i][1] for i in range(len(dataset.dataset))])
+        else:
+            # Direct dataset
+            self.dataset_indices = None
+            self.targets = np.array(dataset.targets)
+        
+        self.num_classes = len(np.unique(self.targets))
         self.num_classes_per_batch = num_classes_per_batch or min(self.num_classes, batch_size // 2)
         self.samples_per_class = batch_size // self.num_classes_per_batch
         
+        # Build class_to_indices mapping
         self.class_to_indices = {}
-        for idx, label in enumerate(dataset.targets):
+        for idx, label in enumerate(self.targets):
             if label not in self.class_to_indices:
                 self.class_to_indices[label] = []
             self.class_to_indices[label].append(idx)
         
-        self.num_batches = min(len(indices) // self.samples_per_class 
-                               for indices in self.class_to_indices.values())
+        # Only use indices if this is a Subset
+        if self.dataset_indices is not None:
+            self.class_to_indices = {
+                cls: [idx for idx in indices if idx in self.dataset_indices]
+                for cls, indices in self.class_to_indices.items()
+            }
+        
+        non_empty_classes = {cls: indices for cls, indices in self.class_to_indices.items() if len(indices) > 0}
+        if not non_empty_classes:
+            self.num_batches = 0
+        else:
+            self.num_batches = min(len(indices) // self.samples_per_class 
+                                   for indices in non_empty_classes.values())
     
     def __iter__(self):
         for _ in range(self.num_batches):
@@ -225,7 +256,11 @@ class ClassBalancedSampler(Sampler):
             for cls in classes:
                 indices = self.class_to_indices[cls]
                 batch.extend(np.random.choice(indices, self.samples_per_class, replace=False))
-            yield batch
+            if self.dataset_indices is not None:
+                # Map local indices back to global indices
+                yield [self.dataset_indices[i] for i in batch]
+            else:
+                yield batch
     
     def __len__(self):
         return self.num_batches

@@ -20,7 +20,7 @@ budget:
 experiment:
   pipeline: contrastive_learning
   dataset_uri: null
-  model_family: resnet18_contrastive
+  model_family: synthetic_contrastive
   training_notes: "Synthetic smoke test: 1 epoch, 2 train batches, 2 eval batches, no internet"
   evaluation_target: Local pipeline validation
   validation_strategy: train_val_test_split
@@ -29,17 +29,18 @@ experiment:
   temperature: 0.1
   batch_size: 4
   learning_rate: 0.001
-  backbone_name: resnet18
+  backbone_name: synthetic
   max_epochs: 1
   num_classes: 10
   samples_per_class: 2
+  embedding_dim: 64
 search_space:
   mutable_fields:
-    model_family: [resnet18_contrastive]
+    model_family: [synthetic_contrastive]
     loss_name: [contrastive]
     margin: [0.1]
     temperature: [0.1]
     batch_size: [4, 8]
     learning_rate: [0.001, 0.0001]
-    backbone_name: [resnet18]
+    backbone_name: [synthetic]
     max_epochs: [1]

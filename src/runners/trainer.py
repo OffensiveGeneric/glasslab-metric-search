@@ -13,7 +13,14 @@ from torch.utils.data import DataLoader
 from search.run_spec import RunSpec
 from src.config import Config
 from src.data.dataset import get_dataloaders
-from src.losses.factory import create_loss, check_loss_supported, get_loss_spec
+from src.losses.factory import create_loss, check_loss_supported, get_loss_spec, list_supported_losses
+from src.losses.losses import SupervisedContrastiveLoss, TripletLoss
+from src.evaluation.embeddings import (
+    evaluate_embeddings,
+    random_embedding_baseline,
+    shuffled_label_baseline,
+    baseline_sane,
+)
 from src.models.backbone import ModelFactory
 from src.metrics.metrics import AdvancedMetrics
 
@@ -209,54 +216,7 @@ def gallery_metadata(
     }
 
 
-def evaluate_embeddings(
-    embeddings: torch.Tensor,
-    labels: torch.Tensor,
-    config: Config,
-    warnings: list[str],
-    context: str,
-) -> dict[str, Any]:
-    if embeddings.numel() == 0 or labels.numel() == 0:
-        warnings.append(f"{context} has no embeddings or labels; metrics are null")
-        return normalize_metric_keys(
-            {
-                "grouped_recall_at_k": None,
-                "opis": None,
-                "ami": None,
-                "ari": None,
-                "nmi": None,
-                "silhouette": None,
-            }
-        )
-
-    num_classes = int(torch.unique(labels.detach().cpu()).numel())
-    if num_classes < 2:
-        warnings.append(f"{context} has fewer than two classes; metrics are null")
-        return normalize_metric_keys(
-            {
-                "grouped_recall_at_k": None,
-                "opis": None,
-                "ami": None,
-                "ari": None,
-                "nmi": None,
-                "silhouette": None,
-            }
-        )
-
-    try:
-        return normalize_metric_keys(AdvancedMetrics(config).compute_all_metrics(embeddings, labels))
-    except Exception as exc:
-        warnings.append(f"{context} metrics could not be computed: {exc}")
-        return normalize_metric_keys(
-            {
-                "grouped_recall_at_k": None,
-                "opis": None,
-                "ami": None,
-                "ari": None,
-                "nmi": None,
-                "silhouette": None,
-            }
-        )
+# evaluate_embeddings is imported from src.evaluation.embeddings
 
 
 def collect_embeddings(
@@ -285,73 +245,7 @@ def collect_embeddings(
     return torch.cat(all_embeddings), torch.cat(all_labels)
 
 
-def shuffled_label_baseline(
-    embeddings: torch.Tensor,
-    labels: torch.Tensor,
-    config: Config,
-    warnings: list[str],
-    context: str,
-) -> dict[str, Any]:
-    generator = torch.Generator().manual_seed(int(config.data.seed))
-    shuffled = labels[torch.randperm(labels.numel(), generator=generator)]
-    return evaluate_embeddings(embeddings, shuffled, config, warnings, context)
-
-
-def random_embedding_baseline(
-    embeddings: torch.Tensor,
-    labels: torch.Tensor,
-    config: Config,
-    warnings: list[str],
-    context: str,
-) -> dict[str, Any]:
-    generator = torch.Generator().manual_seed(int(config.data.seed) + 17)
-    random_embeddings = torch.randn(
-        embeddings.shape,
-        generator=generator,
-        dtype=embeddings.dtype if embeddings.numel() else torch.float32,
-    )
-    metrics = evaluate_embeddings(random_embeddings, labels, config, warnings, context)
-    random_global_recall = metrics.get("global_recall_at_1")
-    random_global_chance_exact = metrics.get("global_recall_at_1_chance_exact")
-    random_global_chance_approx = metrics.get("global_recall_at_1_chance_approx")
-    random_grouped_recall = metrics.get("grouped_recall_at_k")
-    random_grouped_chance = metrics.get("grouped_recall_chance_at_k")
-    
-    metrics["global_recall_at_1_expected_target"] = random_global_chance_exact
-    metrics["global_recall_at_1_abs_error"] = (
-        None
-        if random_global_recall is None or random_global_chance_exact is None
-        else round(float(abs(random_global_recall - random_global_chance_exact)), 4)
-    )
-    metrics["global_recall_at_1_sanity_pass"] = (
-        False
-        if metrics["global_recall_at_1_abs_error"] is None
-        else metrics["global_recall_at_1_abs_error"] <= 0.03
-    )
-    metrics["grouped_recall_at_k_expected_target"] = random_grouped_chance
-    metrics["grouped_recall_at_k_abs_error"] = (
-        None
-        if random_grouped_recall is None or random_grouped_chance is None
-        else round(float(abs(random_grouped_recall - random_grouped_chance)), 4)
-    )
-    metrics["global_recall_at_1_sanity_target_approx"] = random_global_chance_approx
-    metrics["global_recall_at_1_chance_approx"] = random_global_chance_approx
-    return metrics
-
-
-def baseline_sane(
-    observed: Any,
-    chance: Any,
-    *,
-    absolute_tolerance: float = 0.10,
-    relative_tolerance: float = 0.50,
-) -> bool:
-    if observed is None or chance is None:
-        return False
-    observed_f = float(observed)
-    chance_f = float(chance)
-    tolerance = max(absolute_tolerance, abs(chance_f) * relative_tolerance)
-    return abs(observed_f - chance_f) <= tolerance
+# Baseline functions are imported from src.evaluation.embeddings
 
 
 def append_runner_log(output_dir: Path, message: str) -> None:
@@ -478,8 +372,14 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
         if not check_loss_supported(loss_name):
             raise ValueError(f"Unsupported loss '{loss_name}'. Supported losses: {list_supported_losses()}")
         
+        # Use config.loss for loss-specific parameters (from --config YAML)
+        # Fallback to run_spec.config for CLI overrides
+        loss_config = None
+        if hasattr(config.loss, loss_name) and hasattr(getattr(config.loss, loss_name), "get"):
+            loss_config = getattr(config.loss, loss_name)
+        
         try:
-            loss_fn = create_loss(loss_name, run_spec.config.get(loss_name, {}))
+            loss_fn = create_loss(loss_name, loss_config or {})
         except NotImplementedError as e:
             raise NotImplementedError(f"Loss '{loss_name}' not implemented: {e}")
     apply_run_config_overrides(config, run_spec.config or {}, run_spec.budget)

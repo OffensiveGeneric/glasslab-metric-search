@@ -41,13 +41,14 @@ class TorchvisionSource:
     root: str = "./data"
     download: bool = True
     
-    def load(self, train: bool) -> object:
+    def load(self, train: bool, transform=None) -> object:
         if self.name == "cifar100":
             from torchvision import datasets
             return datasets.CIFAR100(
                 root=self.root,
                 train=train,
-                download=self.download
+                download=self.download,
+                transform=transform
             )
         raise ValueError(f"Unknown torchvision dataset: {self.name}")
 

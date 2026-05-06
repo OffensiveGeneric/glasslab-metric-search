@@ -27,7 +27,7 @@ def compute_random_baseline(
     Returns:
         Dictionary of random baseline metrics
     """
-    from src.runners.trainer import random_embedding_baseline
+    from src.evaluation.embeddings import random_embedding_baseline
     
     return random_embedding_baseline(embeddings, labels, config, warnings, context)
 
@@ -51,6 +51,6 @@ def compute_shuffled_baseline(
     Returns:
         Dictionary of shuffled baseline metrics
     """
-    from src.runners.trainer import shuffled_label_baseline
+    from src.evaluation.embeddings import shuffled_label_baseline
     
     return shuffled_label_baseline(embeddings, labels, config, warnings, context)
