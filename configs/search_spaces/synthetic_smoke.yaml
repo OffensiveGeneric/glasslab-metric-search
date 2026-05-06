@@ -1,6 +1,5 @@
-# Synthetic smoke test config: tiny dataset for local smoke tests without internet
-# This config uses the SyntheticDataset instead of CIFAR-100 for fast local testing
-# No internet required - generates synthetic data on the fly
+# Synthetic smoke test config: tests the full workflow without internet
+# Uses simple MLP on random feature tensors (64-dim) instead of real images
 
 workflow_family: synthetic-smoke-test
 search_space_id: synthetic-smoke-test-v0
@@ -20,8 +19,8 @@ budget:
 experiment:
   pipeline: contrastive_learning
   dataset_uri: null
-  model_family: synthetic_contrastive
-  training_notes: "Synthetic smoke test: 1 epoch, 2 train batches, 2 eval batches, no internet"
+  model_family: mlp_contrastive
+  training_notes: "Synthetic smoke test: simple MLP on random features, no internet"
   evaluation_target: Local pipeline validation
   validation_strategy: train_val_test_split
   loss_name: contrastive
@@ -29,18 +28,20 @@ experiment:
   temperature: 0.1
   batch_size: 4
   learning_rate: 0.001
-  backbone_name: synthetic
+  backbone_name: mlp
   max_epochs: 1
   num_classes: 10
   samples_per_class: 2
+  input_dim: 64  # Synthetic dataset feature dimension
+  hidden_dim: 128
   embedding_dim: 64
 search_space:
   mutable_fields:
-    model_family: [synthetic_contrastive]
+    model_family: [mlp_contrastive]
     loss_name: [contrastive]
     margin: [0.1]
     temperature: [0.1]
     batch_size: [4, 8]
     learning_rate: [0.001, 0.0001]
-    backbone_name: [synthetic]
+    backbone_name: [mlp]
     max_epochs: [1]

@@ -90,12 +90,57 @@ class Backbone(nn.Module):
             return features
 
 
+class MLPBackbone(nn.Module):
+    """Simple MLP backbone for synthetic smoke tests
+    
+    Takes feature tensors directly (no images) and projects to embedding space.
+    """
+    
+    def __init__(self, input_dim: int = 64, hidden_dim: int = 128, embedding_dim: int = 64, freeze: bool = False):
+        super().__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.embedding_dim = embedding_dim
+        self.freeze = freeze
+        
+        self.layers = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, embedding_dim),
+            nn.BatchNorm1d(embedding_dim),
+            nn.ReLU(),
+            nn.Linear(embedding_dim, embedding_dim)
+        )
+        
+        if freeze:
+            self.freeze_params()
+    
+    def freeze_params(self):
+        """Freeze parameters"""
+        for param in self.parameters():
+            param.requires_grad = False
+    
+    def forward(self, x):
+        """Project features to embedding space"""
+        with torch.set_grad_enabled(not self.freeze):
+            return self.layers(x)
+
+
 class ModelFactory:
     """Factory for creating different backbones"""
     
     @staticmethod
     def create_backbone(config, backbone_name: str) -> Backbone:
         """Create a backbone model"""
+        # Check for synthetic MLP backbone
+        if backbone_name == "mlp" or backbone_name == "mlp_contrastive":
+            return MLPBackbone(
+                input_dim=getattr(config.experiment if hasattr(config, 'experiment') else config, 'input_dim', 64),
+                hidden_dim=getattr(config.experiment if hasattr(config, 'experiment') else config, 'hidden_dim', 128),
+                embedding_dim=config.model.embedding_dim,
+                freeze=config.model.freeze_backbone
+            )
+        
         return Backbone(
             backbone_name=backbone_name,
             pretrained=config.model.pretrained,
