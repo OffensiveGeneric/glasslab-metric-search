@@ -135,32 +135,54 @@ Metrics use the pattern `{split}_{run_type}_{metric_name}`:
 
 ## Baselines
 
-| Baseline | Test Seen | Test Unseen | Notes |
-|----------|-----------|-------------|-------|
-| Random Embedding | ~5% Global@1, ~41% Grouped@5 | ~5% Global@1, ~41% Grouped@5 | Chance-level baseline |
-| ResNet-50 (supervised) | ~92% Grouped@5, ~39% Global@1 | ~83% Global@1, ~92% Grouped@5 | Strong ImageNet transfer |
-| DINO ViT (self-supervised) | ~96% Grouped@5, ~53% Global@1 | ~97% Grouped@5, ~82% Global@1 | Self-supervised ViT |
-| CLIP (zero-shot multimodal) | ~95% Grouped@5, ~50% Global@1 | ~97% Grouped@5, ~78% Global@1 | Zero-shot CLIP |
+| Baseline | Test Seen | Test Unseen | Lift vs Random | Eval Batches | Notes |
+|----------|-----------|-------------|----------------|-------------|-------|
+| Random Embedding | ~5% Global@1, ~41% Grouped@5 | ~5% Global@1, ~41% Grouped@5 | 0% (by definition) | 8 | Chance-level baseline |
+| ResNet-50 (supervised) | ~92% Grouped@5, ~39% Global@1 | ~83% Global@1, ~92% Grouped@5 | ~44% | 16 | Strong ImageNet transfer |
+| DINO ViT (self-supervised) | ~96% Grouped@5, ~53% Global@1 | ~97% Grouped@5, ~82% Global@1 | ~45% | 16 | Self-supervised ViT |
+| CLIP (zero-shot multimodal) | ~95% Grouped@5, ~50% Global@1 | ~97% Grouped@5, ~78% Global@1 | ~42% | 16 | Zero-shot CLIP |
+| Contrastive ResNet18 trained | ~81% Grouped@5, ~44% Global@1 | ~84% Grouped@5, ~44% Global@1 | ~43% | 16 | Phase 1 small-budget comparison (timm pretrained) |
+| Triplet ResNet18 trained (naive in-batch) | ~82% Grouped@5, ~43% Global@1 | ~84% Grouped@5, ~43% Global@1 | ~42% | 16 | Phase 1 small-budget comparison (timm pretrained) |
 
 ### Phase 1 Training Results (Contrastive vs Triplet)
 
-| Method | Test Seen Grouped@5 | Test Unseen Grouped@5 | Test Unseen Composite | Sanity Pass |
-|--------|---------------------|-----------------------|----------------------|-------------|
-| Contrastive Loss | 80.9% | 84.4% | 0.463 | ✅ |
-| Triplet Loss | 81.7% | 84.4% | 0.463 | ✅ |
+| Method | Test Seen Grouped@5 | Test Unseen Grouped@5 | Test Unseen Composite | Lift vs Random | Eval Batches | Output Dir | Image Commit | Sanity Pass |
+|--------|---------------------|-----------------------|----------------------|----------------|-------------|------------|--------------|-------------|
+| Contrastive Loss (ResNet18, timm pretrained) | 80.9% | 84.4% | 0.452 | ~43% | 16 | phase1-contrastive-phase1-contrastive-txtvd | smoke-test-81a0266 | ✅ |
+| Triplet Loss (ResNet18, timm pretrained) | 81.7% | 84.3% | 0.463 | ~42% | 16 | phase1-triplet-final-phase1-triplet-final-8bc4g | smoke-test-81a0266 | ✅ |
+
+| Baseline Comparison (test_unseen metrics) |
+|-------------------------------------------|
+| **Random Embedding**: Global@1=5%, Grouped@5=41% |
+| **ResNet-50 frozen**: Global@1=68%, Grouped@5=92% |
+| **DINO ViT**: Global@1=82%, Grouped@5=97% |
+| **CLIP**: Global@1=78%, Grouped@5=97% |
+| **Contrastive ResNet18 trained**: Global@1=44%, Grouped@5=84% |
+| **Triplet ResNet18 trained (naive)**: Global@1=43%, Grouped@5=84% |
 
 **Key Findings**:
-- Both Contrastive and Triplet Loss achieve nearly identical performance
-- Grouped@5 ~84% on test_unseen indicates strong structural generalization
-- Composite score ~0.46 indicates good balance of metrics
-- Both methods pass all sanity checks
+- Small-budget Phase 1 comparison showing contrastive and naive in-batch triplet produce similar metrics
+- Both methods achieve ~84% Grouped@5 on test_unseen
+- **Neither trained method outperforms frozen baselines**:
+  - ResNet-50 frozen (82-92%) > Contrastive trained (44-84%)
+  - DINO ViT (82-97%) > Contrastive trained (44-84%)
+  - CLIP (78-97%) > Contrastive trained (44-84%)
+- Random baseline Global@1 ~4.9% (expected ~4.95%) validates evaluation pipeline
+- **Important**: This is NOT conclusive evidence of strong generalization
+- Negative silhouette scores indicate poor cluster separation in both methods
 
 **Experimental Setup**:
 - 3 epochs, 10 train batches, 16 eval batches
 - Batch size: 64, Learning rate: 1e-4, Margin: 0.3
-- Backbone: ResNet-18 (pre-trained on CIFAR-100)
+- Backbone: timm pretrained ResNet-18
+- Image commit: smoke-test-81a0266
 
-See `STATUS_REPORT.md` for full Phase 1 results.
+**Important Notes**:
+1. This is NOT conclusive evidence of strong generalization
+2. The small-budget setup (3 epochs, 10 batches) is for validation, not scientific conclusion
+3. The current triplet implementation uses naive in-batch triplet; next version should add semi-hard/hard negative mining
+4. For rigorous comparison, run 3+ seeds with same configuration and report mean/std
+5. Both methods use timm pretrained ResNet-18 weights (ImageNet pretraining, not CIFAR-100 specific)
 
 ### Baseline Expectations
 
