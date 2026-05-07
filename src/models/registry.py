@@ -34,6 +34,13 @@ BACKBONES: dict[str, BackboneSpec] = {
         supports_freeze_backbone=True,
         notes="Lower-risk baseline for simpler ablations and bring-up.",
     ),
+    "mlp": BackboneSpec(
+        name="mlp",
+        family="mlp",
+        embedding_dim=64,
+        supports_freeze_backbone=True,
+        notes="MLP backbone for synthetic smoke tests (no pretrained weights).",
+    ),
 }
 
 

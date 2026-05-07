@@ -269,11 +269,11 @@ class ClassBalancedSampler(Sampler):
 def get_dataloaders(config: Config) -> dict:
     """Convenience function to create all dataloaders
     
-    Dispatches to appropriate dataloader creation based on dataset_id:
+    Dispatches to appropriate dataloader creation based on dataset or dataset_id:
     - synthetic-smoke: uses SyntheticDataset
     - cifar100-unseen-classes: uses Cifar100Splitter
     """
-    dataset_id = getattr(config.data, "dataset_id", "cifar100-unseen-classes")
+    dataset_id = getattr(config.data, "dataset", "cifar100-unseen-classes")
     
     if dataset_id == "synthetic-smoke":
         from src.data.synthetic.synthetic import create_synthetic_dataloaders

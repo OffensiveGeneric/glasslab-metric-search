@@ -38,15 +38,15 @@ def train_epoch(
     total_loss = 0.0
     num_batches = 0
 
-    for batch_idx, (images, labels) in enumerate(train_loader):
+    for batch_idx, (inputs, labels) in enumerate(train_loader):
         if batch_idx >= max_batches:
             break
 
-        images = images.to(device)
+        inputs = inputs.to(device)
         labels = labels.to(device)
 
         optimizer.zero_grad()
-        embeddings = model(images)
+        embeddings = model(inputs)
 
         if isinstance(loss_fn, SupervisedContrastiveLoss):
             loss = loss_fn(embeddings, labels)
@@ -99,9 +99,9 @@ def evaluate_metrics(
         return {}
 
     with torch.no_grad():
-        for images, labels in test_loader:
-            images = images.to(device)
-            embeddings = model(images)
+        for inputs, labels in test_loader:
+            inputs = inputs.to(device)
+            embeddings = model(inputs)
             all_embeddings.append(embeddings.detach().cpu())
             all_labels.append(labels.detach().cpu())
 
@@ -232,11 +232,11 @@ def collect_embeddings(
     all_embeddings = []
     all_labels = []
     with torch.no_grad():
-        for batch_idx, (images, labels) in enumerate(loader):
+        for batch_idx, (inputs, labels) in enumerate(loader):
             if max_batches is not None and batch_idx >= max_batches:
                 break
-            images = images.to(device)
-            embeddings = model(images)
+            inputs = inputs.to(device)
+            embeddings = model(inputs)
             all_embeddings.append(embeddings.detach().cpu())
             all_labels.append(labels.detach().cpu())
 

@@ -314,13 +314,41 @@ def main() -> None:
     run_dir = args.output_dir
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # Handle both 'dataset' (YAML) and 'data' (Config) field names
+    dataset_val = config.get("dataset", {}).get("dataset", "")
+    if not dataset_val:
+        dataset_val = config.get("data", {}).get("dataset", "")
     dataset_id = config.get("dataset", {}).get("dataset_id", "")
-    if "cifar100" in dataset_id.lower():
+    if not dataset_id:
+        dataset_id = config.get("data", {}).get("dataset_id", "")
+    dataset_name = dataset_id or dataset_val
+    if "cifar100" in dataset_name.lower():
         validate_cifar100_config(config["experiment"])
     else:
         validate_experiment_config(config["experiment"])
 
-    dataset = DatasetBinding(**config["dataset"])
+    # Handle both 'dataset' (YAML) and 'data' (Config) field names
+    # DatasetBinding requires: dataset, dataset_id, split_version, train_uri, val_uri, test_uri
+    # Config.data has: dataset, dataset_id, num_classes, seed, etc.
+    # Config.dataset has: train_uri, val_uri, test_uri
+    if "dataset" in config and "data" in config:
+        # Both exist: merge them
+        dataset_dict = config["data"].copy()
+        dataset_dict.update(config["dataset"])
+    elif "dataset" in config:
+        # Only dataset exists
+        dataset_dict = config["dataset"].copy()
+        dataset_dict.setdefault("dataset_id", dataset_dict.get("dataset", ""))
+        # If dataset_id is not set but dataset is, use dataset as dataset_id
+        if "dataset" in dataset_dict and "dataset_id" not in dataset_dict:
+            dataset_dict["dataset_id"] = dataset_dict["dataset"]
+    elif "data" in config:
+        # Only data exists
+        dataset_dict = config["data"].copy()
+        dataset_dict.setdefault("dataset_id", dataset_dict.get("dataset", ""))
+    else:
+        raise KeyError("Neither 'dataset' nor 'data' found in config")
+    dataset = DatasetBinding(**dataset_dict)
     resources = Resources(**config["resources"])
 
     budget_config = config["budget"].copy()
@@ -358,6 +386,10 @@ def main() -> None:
         run_spec.run_id = glasslab_run_id
     run_spec.write_json(run_dir / "run_spec.json")
     write_text(run_dir / "config.json", json.dumps(config, indent=2, sort_keys=True) + "\n")
+    # Also write YAML config for trainer compatibility
+    import yaml
+    with open(run_dir / "config.yaml", "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=True)
     write_text(run_dir / "run_manifest.json", json.dumps(build_run_manifest(run_spec), indent=2, sort_keys=True) + "\n")
     append_log(run_dir, "INFO metric-search run started")
 

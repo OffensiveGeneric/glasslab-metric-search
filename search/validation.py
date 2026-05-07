@@ -33,8 +33,15 @@ def validate_experiment_config(config: dict) -> None:
 def validate_cifar100_config(config: dict) -> None:
     validate_experiment_config(config)
     
+    # Handle both 'dataset' (YAML) and 'data' (Config) field names
+    dataset_val = config.get("dataset", {}).get("dataset", "")
+    if not dataset_val:
+        dataset_val = config.get("data", {}).get("dataset", "")
     dataset_id = config.get("dataset", {}).get("dataset_id", "")
-    if "cifar100" in dataset_id.lower():
+    if not dataset_id:
+        dataset_id = config.get("data", {}).get("dataset_id", "")
+    dataset_name = dataset_id or dataset_val
+    if "cifar100" in dataset_name.lower():
         pipeline = config.get("pipeline", "contrastive")
         
         if pipeline == "contrastive_learning":
@@ -48,13 +55,13 @@ def validate_cifar100_config(config: dict) -> None:
                 raise ValueError(f"CIFAR-100 contrastive learning requires loss_name from: {allowed}")
             
             backbone_name = config.get("backbone_name", "resnet50")
-            if backbone_name not in ["resnet18", "resnet50", "vit_base_patch16", "convnext_base"]:
-                allowed = ", ".join(["resnet18", "resnet50", "vit_base_patch16", "convnext_base"])
+            if backbone_name not in ["resnet18", "resnet50", "vit_base_patch16", "convnext_base", "mlp"]:
+                allowed = ", ".join(["resnet18", "resnet50", "vit_base_patch16", "convnext_base", "mlp"])
                 raise ValueError(f"CIFAR-100 contrastive learning requires backbone_name from: {allowed}")
         else:
             backbone = config.get("backbone", {}).get("name", "")
-            if backbone not in ["resnet50", "vit_base_patch16", "convnext_base"]:
-                allowed = ", ".join(["resnet50", "vit_base_patch16", "convnext_base"])
+            if backbone not in ["resnet50", "vit_base_patch16", "convnext_base", "mlp"]:
+                allowed = ", ".join(["resnet50", "vit_base_patch16", "convnext_base", "mlp"])
                 raise ValueError(f"CIFAR-100 experiments require backbone from: {allowed}")
             
             loss = config.get("loss", {}).get("name", "")

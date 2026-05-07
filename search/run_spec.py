@@ -29,11 +29,12 @@ class Resources:
 
 @dataclass
 class DatasetBinding:
-    dataset_id: str
+    dataset: str
     split_version: str
     train_uri: str
     val_uri: str
     test_uri: str
+    dataset_id: str = ""
 
 
 @dataclass
@@ -101,6 +102,14 @@ def load_run_spec(path: Path) -> RunSpec:
     budget_data = payload["budget"].copy()
     budget_data.setdefault("max_train_batches", None)
     budget_data.setdefault("max_eval_batches", None)
+    # Handle both 'dataset' and 'data' field names for backward compatibility
+    if "data" in payload and "dataset" not in payload:
+        # data field exists, convert to dataset format
+        dataset_data = payload["data"].copy()
+        dataset_data.setdefault("dataset_id", dataset_data.get("dataset", ""))
+    else:
+        dataset_data = payload.get("data", payload.get("dataset", {}))
+        dataset_data.setdefault("dataset_id", dataset_data.get("dataset", ""))
     return RunSpec(
         run_id=payload["run_id"],
         parent_run_id=payload.get("parent_run_id"),
@@ -109,7 +118,7 @@ def load_run_spec(path: Path) -> RunSpec:
         submitted_by=payload["submitted_by"],
         workflow_family=payload["workflow_family"],
         search_space_id=payload["search_space_id"],
-        dataset=DatasetBinding(**payload["dataset"]),
+        dataset=DatasetBinding(**dataset_data),
         resources=Resources(**payload["resources"]),
         budget=Budget(**budget_data),
         config=payload["config"],

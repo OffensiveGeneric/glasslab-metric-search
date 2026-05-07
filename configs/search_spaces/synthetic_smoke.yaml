@@ -3,9 +3,13 @@
 
 workflow_family: synthetic-smoke-test
 search_space_id: synthetic-smoke-test-v0
+data:
+  dataset: synthetic-smoke
 dataset:
-  dataset_id: synthetic-smoke
   split_version: smoke-test-v0
+  train_uri: s3://dummy/train
+  val_uri: s3://dummy/val
+  test_uri: s3://dummy/test
   # No S3 URIs needed - synthetic data is generated locally
 resources:
   gpu_count: 0  # CPU only for local smoke tests

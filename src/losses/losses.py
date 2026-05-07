@@ -31,7 +31,12 @@ class SupervisedContrastiveLoss(nn.Module):
             similarity_matrix, dim=1, keepdim=True
         )
         
-        loss = -torch.sum(log_sim_matrix * mask) / torch.sum(mask)
+        mask_sum = torch.sum(mask)
+        if mask_sum == 0:
+            # No positive pairs in batch, return 0 loss with grad
+            return torch.tensor(0.0, device=device, requires_grad=True)
+        
+        loss = -torch.sum(log_sim_matrix * mask) / mask_sum
         
         return loss
 
