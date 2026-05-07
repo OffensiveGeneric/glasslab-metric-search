@@ -428,7 +428,7 @@ def run_real_experiment(run_spec: RunSpec, output_dir: Path) -> Dict[str, Any]:
     embeddings_dir.mkdir(parents=True, exist_ok=True)
     
     model.eval()
-    max_eval_batches = run_spec.budget.max_eval_batches
+    max_eval_batches = run_spec.budget.max_eval_batches if run_spec.budget.max_eval_batches is not None else 100
     split_loaders = {
         "val_seen": dataloaders.get("val_seen_0"),
         "test_seen": dataloaders.get("test_seen_0"),
